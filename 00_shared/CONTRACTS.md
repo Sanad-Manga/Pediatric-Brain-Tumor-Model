@@ -3,7 +3,7 @@
 Project: federated, domain-adaptive 3D segmentation for pediatric brain tumors (BraTS-PEDs).
 
 ## Data
-- Modalities per subject: t1c, t1n, t2f, t2w (.nii.gz).
+- Modalities per subject: t1c, t1n, t2f, t2w (raw source is `.nii.gz`; the shared resampled cache is `.npz` — see "Data pipeline" below).
 - Label (seg file) — verified against actual dataset, 4 tumor subregions, not 3:
   - 1 = Enhancing Tumor (ET)
   - 2 = Non-Enhancing Tumor (NET)
@@ -51,6 +51,14 @@ Save every epoch to `checkpoints/<run_id>/`. Colab disconnects — resume-from-c
 - Until the cache is up: every section builds and tests against dummy/random tensors,
   per its own `BRIEF.md`. This isn't a workaround — it's the intended build order so
   nobody sits idle waiting on the data pipeline.
+- **Cache format (confirmed against the actual shared folder):** one flat file per subject,
+  `<cache_path>/<subject_id>.npz`, containing 5 arrays keyed `"t1c"`, `"t1n"`, `"t2f"`, `"t2w"`
+  (each `96×96×96` float16, raw un-normalized intensities) and `"seg"` (`96×96×96` uint8,
+  labels 0–4). No per-subject subfolders, no `.nii.gz` in the cache itself. Intensities are
+  **not** pre-normalized — each modality's raw range varies per subject/scanner (e.g. t1c up
+  to ~1850, t2w up to ~2650 observed) and should be normalized (e.g. z-score over brain
+  tissue, ignoring the zero background) by whatever loads the cache, not assumed to already
+  be scaled.
 
 ## Team sections (6 people, 5 sections)
 - `01_model_federated` — 2 people, model + FedAvg loop
