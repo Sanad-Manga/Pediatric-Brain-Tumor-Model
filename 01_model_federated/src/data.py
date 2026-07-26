@@ -18,6 +18,28 @@ NUM_LABELS = 5  # 0=background, 1=ET, 2=NET, 3=CC, 4=ED
 MODALITIES = ("t1c", "t1n", "t2f", "t2w")
 
 
+def _zscore_normalize(volume: np.ndarray) -> np.ndarray:
+    """Zero-mean, unit-variance normalization over brain tissue only (voxels > 0),
+    so the background (which is exactly 0 in this resampled cache) doesn't skew
+    the mean/std. Raw MRI intensity scales vary per subject/scanner/modality
+    (e.g. t1c up to ~1852, t2w up to ~2646 in this cache) - unnormalized inputs
+    like that are the kind of thing that quietly slows or destabilizes training.
+    """
+    brain_mask = volume > 0
+    if not brain_mask.any():
+        return volume
+    brain_voxels = volume[brain_mask]
+    mean = brain_voxels.mean()
+    std = brain_voxels.std()
+
+    normalized = np.zeros_like(volume)
+    if std < 1e-8:
+        normalized[brain_mask] = brain_voxels - mean
+    else:
+        normalized[brain_mask] = (brain_voxels - mean) / std
+    return normalized
+
+
 def load_manifest(manifest_path: str) -> list[str]:
     path = Path(manifest_path)
     if not path.is_file():
@@ -83,7 +105,9 @@ class BraTSPedsDataset(Dataset):
             raise FileNotFoundError(f"Missing cached subject file: {npz_path}")
 
         with np.load(npz_path) as data:
-            x = np.stack([data[m].astype(np.float32) for m in MODALITIES], axis=0)
+            x = np.stack(
+                [_zscore_normalize(data[m].astype(np.float32)) for m in MODALITIES], axis=0
+            )
             y = data["seg"].astype(np.int64)
 
         return torch.from_numpy(x), torch.from_numpy(y)
