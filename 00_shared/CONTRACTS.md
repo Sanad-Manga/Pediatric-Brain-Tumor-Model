@@ -39,6 +39,19 @@ Evaluated on the held-out 82-subject set only.
 ## Checkpointing
 Save every epoch to `checkpoints/<run_id>/`. Colab disconnects — resume-from-checkpoint is not optional.
 
+## Data pipeline — who provides what, and how
+- The raw 32GB dataset lives on Ahmed's laptop only. **It never gets uploaded anywhere** —
+  a free Google account can't hold it, and nobody else needs the raw files anyway.
+- Ahmed runs a one-time script locally that resamples every volume to 96³ and saves the
+  much smaller result (order of a few GB, not 32GB) to the shared Drive folder. This is
+  a blocking prerequisite — nobody can train/test on real data until this cache exists.
+- Every other section reads from that shared cache, filtered by the manifests
+  (`hospitalA.json` / `hospitalB.json` / `heldout.json`) — same cache, same files, just
+  a different subject-ID filter per section. Nobody downloads or stores their own copy.
+- Until the cache is up: every section builds and tests against dummy/random tensors,
+  per its own `BRIEF.md`. This isn't a workaround — it's the intended build order so
+  nobody sits idle waiting on the data pipeline.
+
 ## Team sections (6 people, 5 sections)
 - `01_model_federated` — 2 people, model + FedAvg loop
 - `02_domain_adaptation` — CORAL + PCA/LDA
