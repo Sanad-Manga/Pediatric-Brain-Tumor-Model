@@ -1,0 +1,23 @@
+# Data and large artifacts never go in git — they live on the shared Drive only
+*.nii
+*.nii.gz
+*.pt
+*.pth
+*.npy
+*.npz
+checkpoints/
+logs/
+outputs/
+data/
+_private_ahmed/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
