@@ -9,9 +9,12 @@ st.set_page_config(
 )
 
 # 2. Modern Navigation Setup (This forces all pages to appear neatly in the sidebar)
+# NOTE: the landing page lives in pages/Command_Center.py, not here. This file is the
+# entry script — registering it as a page too would make pg.run() re-execute Home.py,
+# which recurses into pg.run() again (RecursionError).
 pages = {
     "Platform": [
-        st.Page("Home.py", title="AI Command Center", icon="⚡"),
+        st.Page("pages/Command_Center.py", title="AI Command Center", icon="⚡", default=True),
     ],
     "Clinical & Analysis": [
         st.Page("pages/MRI_Analysis.py", title="MRI Analysis Studio", icon="🖥️"),
