@@ -96,14 +96,34 @@ def append_result_row(row: dict, csv_path: str | Path) -> Path:
 
 
 # ------------------------------------------------------------------ restacking
-def restack_volume(arr: np.ndarray, plane: str, cfg: Config, channelled: bool = False) -> np.ndarray:
+def restack_volume(arr: np.ndarray, plane: str, cfg: Config, channelled: bool = False,
+                   indices=None, volume_shape=None) -> np.ndarray:
     """Stack per-plane slices back into the volume frame.
 
     ``(N, H, W)`` -> ``(X, Y, Z)``, or ``(C, N, H, W)`` -> ``(C, X, Y, Z)`` when
-    ``channelled``. This is the exact inverse of the slicing in ``slices.py``.
+    ``channelled``.
+
+    With ``indices``, each slice is placed at its **true volume position** and
+    any missing slice stays background. Subjects whose blank edge slices were
+    dropped from the cache run e.g. 8..134 rather than 0..154, so stacking them
+    densely would shorten the volume and misalign it -- and would give axial and
+    coronal different shapes, which the ``both`` policy cannot average.
+
+    A dropped slice is background in the prediction and in the ground truth
+    alike, so filling it with zeros leaves Dice unchanged.
     """
     axis = cfg.plane_axis(plane)
-    return np.moveaxis(arr, 1, axis + 1) if channelled else np.moveaxis(arr, 0, axis)
+    if indices is None:
+        return np.moveaxis(arr, 1, axis + 1) if channelled else np.moveaxis(arr, 0, axis)
+
+    vs = tuple(volume_shape or cfg.volume_shape)
+    if channelled:
+        out = np.zeros((arr.shape[0], *vs), dtype=arr.dtype)
+        np.moveaxis(out, axis + 1, 1)[:, list(indices)] = arr
+    else:
+        out = np.zeros(vs, dtype=arr.dtype)
+        np.moveaxis(out, axis, 0)[list(indices)] = arr
+    return out
 
 
 @torch.no_grad()
@@ -143,19 +163,22 @@ def evaluate_subject(model, items, cfg: Config, device: str = "cpu"):
     for item in items:
         plane = item["plane"]
         planes_used.append(plane)
+        indices = item.get("slice_indices")
 
         logits = predict_slices(model, item["images"], device=device)      # (N, C, H, W)
         logits = unpad(logits, item["pad"])                                # native shape
         labels = unpad(item["labels"], item["pad"])                        # (N, H, W)
 
-        true_volume = restack_volume(labels, plane, cfg)
+        true_volume = restack_volume(labels, plane, cfg, indices=indices)
 
         if plane_policy == "both":
             probs = _softmax(logits, axis=1).transpose(1, 0, 2, 3)         # (C, N, H, W)
-            volume_probs = restack_volume(probs, plane, cfg, channelled=True)
+            volume_probs = restack_volume(probs, plane, cfg, channelled=True,
+                                          indices=indices)
             prob_sum = volume_probs if prob_sum is None else prob_sum + volume_probs
         else:
-            pred_volume = restack_volume(np.argmax(logits, axis=1), plane, cfg)
+            pred_volume = restack_volume(np.argmax(logits, axis=1), plane, cfg,
+                                         indices=indices)
 
     if plane_policy == "both":
         pred_volume = np.argmax(prob_sum, axis=0)
@@ -166,12 +189,16 @@ def evaluate_subject(model, items, cfg: Config, device: str = "cpu"):
 def build_eval_dataset(cfg: Config, dummy_data: bool, dummy_n: int, cache_dir=None, tmp_dir=None):
     """The held-out evaluation set, or a synthetic stand-in for ``--dummy-data``."""
     if dummy_data:
-        from .dummy import make_dummy_cache
+        from .dummy import DUMMY_VOLUME_SHAPE, make_dummy_cache
 
         LOGGER.info("using a synthetic slice cache (the real cache is not read)")
         tmp_dir = Path(tmp_dir)
         subjects = [f"DUMMY-{i:04d}" for i in range(dummy_n)]
-        make_dummy_cache(tmp_dir, subjects, cfg, volume_shape=(24, 24, 16), seed=0)
+        # Restacking places slices at their true position in data.volume_shape,
+        # so that has to describe the synthetic volumes, not the real dataset.
+        cfg.data = dict(cfg.data)
+        cfg.data["volume_shape"] = list(DUMMY_VOLUME_SHAPE)
+        make_dummy_cache(tmp_dir, subjects, cfg, volume_shape=DUMMY_VOLUME_SHAPE, seed=0)
         return EvalSubjectDataset(subjects, cfg, cache_dir=tmp_dir), subjects
 
     subjects = load_manifest(cfg.resolve("manifests"), "heldout")

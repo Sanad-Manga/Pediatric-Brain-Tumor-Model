@@ -142,8 +142,8 @@ def test_et_entries_really_contain_enhancing_tumour(cfg, cache):
     for plan in plans.values():
         counted = 0
         for entry in plan["entries"]:
-            mask = index[entry["source_subject_id"]][entry["plane"]]["has_et"]
-            if bool(np.asarray(mask, dtype=bool)[entry["slice_index"]]):
+            et = set(index[entry["source_subject_id"]][entry["plane"]]["et"])
+            if entry["slice_index"] in et:
                 counted += 1
         assert counted == plan["stats"]["et_entries"]
 
@@ -251,11 +251,11 @@ def test_augmented_slices_follow_the_same_order_as_the_originals(cfg, cache, ups
     index = index_cache(cache, cfg.planes)
 
     def kind(entry):
-        planes = index[entry["source_subject_id"]][entry["plane"]]
+        summary = index[entry["source_subject_id"]][entry["plane"]]
         i = entry["slice_index"]
-        if bool(np.asarray(planes["has_et"], dtype=bool)[i]):
+        if i in set(summary["et"]):
             return "et"
-        if bool(np.asarray(planes["has_tumor"], dtype=bool)[i]):
+        if i in set(summary["tumor"]):
             return "tumor"
         return "empty"
 

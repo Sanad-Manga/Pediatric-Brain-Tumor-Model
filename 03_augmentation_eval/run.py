@@ -2,13 +2,14 @@
 """Section 03 — 2D slice augmentation + ablation. The single entry point.
 
     python run.py test                  verify everything with no data, no model
-    python run.py slices --out cache_2d export axial + coronal slices
+    python run.py index                 scan the slice cache once (tumour/ET presence)
     python run.py plan --report         build the balanced per-hospital plan
     python run.py preview --n 8         sanity-check augmentation, save a PNG
     python run.py eval --experiment-name baseline --dummy-checkpoint --dummy-data
 
-Anything not reachable through this file does not count as delivered. Every
-command states what it wrote and where.
+The 2D slices are produced from the original volumes by the team; this section
+consumes them. Anything not reachable through this file does not count as
+delivered. Every command states what it wrote and where.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ if str(HERE) not in sys.path:
 
 from src.config import load_config  # noqa: E402
 
-COMMANDS = ("test", "slices", "plan", "preview", "eval")
+COMMANDS = ("test", "index", "plan", "preview", "eval")
 
 
 # ------------------------------------------------------------------ run.py test
@@ -42,23 +43,35 @@ def cmd_test(args) -> int:
     return int(code)
 
 
-# ---------------------------------------------------------------- run.py slices
-def cmd_slices(args) -> int:
-    from src.slices import export_cache
+# ----------------------------------------------------------------- run.py index
+def cmd_index(args) -> int:
+    """Scan every mask once and record which slices contain tumour / ET.
+
+    The slice cache stores image and mask only. `plan` needs tumour presence
+    *before* it selects slices, and deriving that means opening every mask file
+    (~90,000 for the full cohort), so it is done once here.
+    """
+    from src.slices import build_index, list_subjects, write_index
 
     cfg = load_config(args.config)
-    out_dir = Path(args.out) if args.out else cfg.resolve("cache_2d")
-    planes = [p.strip() for p in args.planes.split(",")] if args.planes else None
+    cache_dir = Path(args.cache) if args.cache else cfg.resolve("cache_2d")
+    planes = [p.strip() for p in args.planes.split(",")] if args.planes else cfg.planes
 
-    summary = export_cache(cfg, out_dir, manifest=args.manifest, limit=args.limit, planes=planes)
+    subjects = list_subjects(cache_dir)
+    if args.limit:
+        subjects = subjects[: args.limit]
 
-    print(f"planes exported: {', '.join(summary['planes'])} (sagittal dropped)")
-    print(f"subjects written: {summary['subjects_written']} of {summary['subjects_requested']}")
-    if summary["subjects_skipped"]:
-        print(f"subjects skipped: {len(summary['subjects_skipped'])} "
-              f"({', '.join(summary['subjects_skipped'][:5])}...)")
-    print(f"files written: {len(summary['files_written'])}")
-    print(f"wrote: {Path(summary['out_dir']).resolve()}")
+    index = build_index(cache_dir, planes=planes, subjects=subjects)
+    path = write_index(index, cache_dir)
+
+    print(f"planes indexed: {', '.join(planes)} (sagittal not used)")
+    print(f"subjects: {index['n_subjects']}    slice files scanned: {index['n_slice_files']}")
+    tumor = sum(len(p["tumor"]) for s in index["subjects"].values() for p in s.values())
+    et = sum(len(p["et"]) for s in index["subjects"].values() for p in s.values())
+    if index["n_slice_files"]:
+        print(f"slices with tumour: {tumor} ({tumor / index['n_slice_files']:.1%})    "
+              f"with ET: {et} ({et / index['n_slice_files']:.1%})")
+    print(f"wrote: {path.resolve()}")
     return 0
 
 
@@ -207,13 +220,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_test.add_argument("-v", "--verbose", action="store_true")
     p_test.set_defaults(func=cmd_test)
 
-    p_slices = sub.add_parser("slices", help="export axial + coronal slices from NIfTI")
-    p_slices.add_argument("--out", default=None, help="output cache directory")
-    p_slices.add_argument("--limit", type=int, default=None, help="only the first N subjects")
-    p_slices.add_argument("--manifest", default="all",
-                          help="hospitalA | hospitalB | heldout | all")
-    p_slices.add_argument("--planes", default=None, help="comma-separated, default axial,coronal")
-    p_slices.set_defaults(func=cmd_slices)
+    p_index = sub.add_parser("index", help="scan the slice cache, record tumour/ET presence")
+    p_index.add_argument("--cache", default=None, help="override paths.cache_2d")
+    p_index.add_argument("--limit", type=int, default=None, help="only the first N subjects")
+    p_index.add_argument("--planes", default=None, help="comma-separated, default axial,coronal")
+    p_index.set_defaults(func=cmd_index)
 
     p_plan = sub.add_parser("plan", help="build the balanced per-hospital slice plan")
     p_plan.add_argument("--report", action="store_true", help="print the per-hospital table")

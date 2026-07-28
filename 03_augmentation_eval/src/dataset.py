@@ -18,7 +18,6 @@ mixing them makes CORAL align the plane difference instead of the scanner one.
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -26,51 +25,33 @@ from torch.utils.data import Dataset, Sampler
 
 from .augment import apply_augmentation, build_transforms
 from .config import Config
-from .slices import load_subject_plane, normalize, pad_to
+from .slices import list_slice_indices, load_slice, pad_to
 
 
-class _CacheReader:
-    """Tiny LRU over decompressed cache files.
+def _load_slice(cache_dir, cfg: Config, subject_id, plane, slice_index):
+    """One padded slice: ``(image (4,H,W), label (1,H,W), pad, orig_shape)``.
 
-    One subject/plane file holds every slice of that volume, so re-reading it
-    per slice would decompress ~70MB each time. Two entries is enough for the
-    access patterns here (sequential within a subject).
+    The cache stores `image` already z-scored per volume over brain voxels, with
+    channels in the order t1c, t1n, t2f, t2w -- exactly the layout the model
+    consumes -- so nothing is normalised or re-stacked here.
     """
+    data = load_slice(cache_dir, subject_id, plane, slice_index)
 
-    def __init__(self, cache_dir: Path, maxsize: int = 2):
-        self.cache_dir = Path(cache_dir)
-        self.maxsize = maxsize
-        self._store: OrderedDict[tuple[str, str], dict] = OrderedDict()
+    image = np.asarray(data["image"], dtype=np.float32)
+    if image.shape[0] != len(cfg.modalities):
+        raise ValueError(
+            f"{subject_id}/{plane}/{slice_index}: image has {image.shape[0]} channels, "
+            f"expected {len(cfg.modalities)} ({', '.join(cfg.modalities)})"
+        )
 
-    def get(self, subject_id: str, plane: str) -> dict:
-        key = (subject_id, plane)
-        if key in self._store:
-            self._store.move_to_end(key)
-            return self._store[key]
-        data = load_subject_plane(self.cache_dir, subject_id, plane)
-        self._store[key] = data
-        if len(self._store) > self.maxsize:
-            self._store.popitem(last=False)
-        return data
-
-
-def _load_slice(reader: _CacheReader, cfg: Config, subject_id, plane, slice_index):
-    """One normalised, padded slice: ``(image (C,H,W), label (1,H,W), pad, orig_shape)``."""
-    data = reader.get(subject_id, plane)
-    modalities = cfg.modalities
-    mean, std = data["norm_mean"], data["norm_std"]
-
-    channels = [
-        normalize(data[mod][slice_index], float(mean[m]), float(std[m]), cfg.min_std)
-        for m, mod in enumerate(modalities)
-    ]
-    image = np.stack(channels, axis=0)
-    label = data["seg"][slice_index][None].astype(np.int64)
+    label = np.asarray(data["mask"], dtype=np.int64)
+    if label.ndim == 2:
+        label = label[None]
 
     orig_shape = tuple(image.shape[-2:])
     image, pad = pad_to(image, cfg.common_size)
     label, _ = pad_to(label, cfg.common_size)
-    return image.astype(np.float32), label, pad, orig_shape
+    return image, label, pad, orig_shape
 
 
 class SliceDataset(Dataset):
@@ -83,7 +64,7 @@ class SliceDataset(Dataset):
     def __init__(self, entries, cfg: Config, cache_dir: Path | None = None):
         self.entries = list(entries)
         self.cfg = cfg
-        self.reader = _CacheReader(Path(cache_dir) if cache_dir else cfg.resolve("cache_2d"))
+        self.cache_dir = Path(cache_dir) if cache_dir else cfg.resolve("cache_2d")
         self.transforms = build_transforms(cfg)
 
     def __len__(self) -> int:
@@ -92,7 +73,7 @@ class SliceDataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         entry = self.entries[idx]
         image, label, pad, orig_shape = _load_slice(
-            self.reader, self.cfg,
+            self.cache_dir, self.cfg,
             entry["source_subject_id"], entry["plane"], entry["slice_index"],
         )
 
@@ -117,7 +98,6 @@ class EvalSubjectDataset(Dataset):
     def __init__(self, subject_ids, cfg: Config, cache_dir: Path | None = None, planes=None):
         self.cfg = cfg
         self.cache_dir = Path(cache_dir) if cache_dir else cfg.resolve("cache_2d")
-        self.reader = _CacheReader(self.cache_dir)
         plane_choice = cfg.eval_plane
         self.planes = list(planes) if planes else (
             list(cfg.planes) if plane_choice == "both" else [plane_choice]
@@ -129,14 +109,20 @@ class EvalSubjectDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         subject_id, plane = self.items[idx]
-        data = self.reader.get(subject_id, plane)
-        n_slices = int(data["seg"].shape[0])
+        # Actual slice indices, not range(N): subjects whose blank edge slices
+        # were dropped run e.g. 8..134, and stacking on positions would leave
+        # the restacked prediction volume misaligned with its ground truth.
+        indices = list_slice_indices(self.cache_dir, subject_id, plane)
+        if not indices:
+            raise FileNotFoundError(
+                f"no slices for {subject_id}/{plane} under {self.cache_dir}"
+            )
 
         images, labels, pads = [], [], []
         orig_shape = None
-        for i in range(n_slices):
+        for i in indices:
             image, label, pad, orig_shape = _load_slice(
-                self.reader, self.cfg, subject_id, plane, i
+                self.cache_dir, self.cfg, subject_id, plane, i
             )
             images.append(image)
             labels.append(label[0])
@@ -149,7 +135,8 @@ class EvalSubjectDataset(Dataset):
             "labels": np.stack(labels, axis=0),      # (N, H, W) padded
             "pad": pads[0],
             "orig_shape": orig_shape,
-            "n_slices": n_slices,
+            "slice_indices": indices,
+            "n_slices": len(indices),
         }
 
 
