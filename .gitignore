@@ -21,3 +21,10 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Data Preprocessing ignores
+06_data_preprocessing/reports/
+06_data_preprocessing/__pycache__/
+06_data_preprocessing/src/**/__pycache__/
+*.npz
+*.nii.gz

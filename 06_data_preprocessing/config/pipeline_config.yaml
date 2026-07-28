@@ -1,0 +1,27 @@
+# Pediatric BraTS Processing Configuration
+
+dataset:
+  raw_dir: "G:/PKG - BraTS-PEDs-v1/BraTS-PEDs-v1/Training"
+  processed_dir: "G:/PKG - BraTS-PEDs-v1/BraTS-PEDs-v1/Processed_2D"
+  modalities: ["t1c", "t1n", "t2f", "t2w"]
+  mask_key: "seg"
+  patient_prefix: "BraTS-PED-"
+
+analysis:
+  output_report_path: "./reports/dataset_analysis_report.json"
+  summary_csv_path: "./reports/patient_summary.csv"
+
+preprocessing:
+  target_orientation: "RAS"       # Right, Anterior, Superior
+  intensity:
+    clip_percentile_low: 0.5
+    clip_percentile_high: 99.5
+    nonzero_zscore: true
+  
+  occupancy_thresholds:
+    min_brain_occupancy: 0.05    # Keep slices with >= 5% brain tissue area
+    include_all_tumor: true      # Always keep any slice with tumor voxels > 0
+
+output_format:
+  export_2d_npz: true             # Multi-modal stack [4, H, W] + mask [1, H, W]
+  save_3d_normalized: false       # Set true if 3D volumes are also needed
