@@ -1,4 +1,6 @@
 import streamlit as st
+
+import backend as be
 from datetime import datetime
 
 st.set_page_config(page_title="Segmentation Report | NeuroFed AI", page_icon="📋", layout="wide")
@@ -47,7 +49,7 @@ st.markdown("""
 /* confidence ring placeholder */
 .conf-ring {
     width:110px; height:110px; border-radius:50%;
-    background: conic-gradient(#34D399 0% 96.4%, rgba(255,255,255,0.07) 96.4% 100%);
+    background: conic-gradient(rgba(255,255,255,0.10) 0% 100%);
     display:flex; align-items:center; justify-content:center;
     margin:0 auto 12px auto;
     box-shadow: 0 0 24px rgba(52,211,153,0.25);
@@ -93,7 +95,7 @@ st.markdown("""
 
 <div class="page-hero">
     <div class="page-title">Clinical AI Segmentation Report</div>
-    <div class="page-sub">Validated diagnostic summary generated from the BraTS-PEDs federated inference pipeline.</div>
+    <div class="page-sub">Diagnostic summary layout. Metrics populate once a trained checkpoint exists.</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -106,6 +108,27 @@ st.markdown(f"""
 <div style="margin-bottom:20px;"></div>
 """, unsafe_allow_html=True)
 
+if not be.cache_available():
+    st.error(f"Cache directory not found: `{be.CACHE_DIR}`")
+    st.stop()
+
+
+@st.cache_data(show_spinner="Loading volume…")
+def _load_seg(subject_id: str):
+    v = be.load_volume(subject_id)
+    return v.seg, v.cohort
+
+
+_subjects = be.list_subjects()
+_sel1, _sel2 = st.columns([1, 2])
+_cohort = _sel1.selectbox("Cohort", list(_subjects.keys()), index=2)
+_sid = _sel2.selectbox("Subject", _subjects[_cohort])
+_seg, _cohort_name = _load_seg(_sid)
+_sub = {r["name"]: r for r in be.subregion_stats(_seg)}
+_reg = {r["region"]: r for r in be.region_stats(_seg)}
+_status = be.model_status()
+_wt_ml = _reg["WT"]["volume_ml"]
+
 col_main, col_side = st.columns([2, 1], gap="medium")
 
 # ══════════════════════════════════════════════════════
@@ -114,21 +137,21 @@ col_main, col_side = st.columns([2, 1], gap="medium")
 with col_main:
 
     # Patient metadata
-    st.markdown("""
+    st.markdown(f"""
     <div class="panel">
         <div class="panel-title">📄 Patient & Scan Metadata</div>
         <table class="meta-table">
             <tr>
                 <td class="meta-key">Subject ID</td>
-                <td class="meta-val" style="color:#38BDF8;font-family:'JetBrains Mono',monospace;font-weight:600;">PED_0042_Session1</td>
+                <td class="meta-val" style="color:#38BDF8;font-family:'JetBrains Mono',monospace;font-weight:600;">{_sid}</td>
             </tr>
             <tr>
                 <td class="meta-key">Dataset Cohort</td>
-                <td class="meta-val">BraTS-PEDs 2024 Pediatric Benchmark</td>
+                <td class="meta-val">{_cohort_name}</td>
             </tr>
             <tr>
                 <td class="meta-key">MRI Modalities</td>
-                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">T1 · T1c · T2 · FLAIR</td>
+                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">t1c · t1n · t2f · t2w</td>
             </tr>
             <tr>
                 <td class="meta-key">Volume Shape</td>
@@ -136,11 +159,11 @@ with col_main:
             </tr>
             <tr>
                 <td class="meta-key">Total Tumor Volume</td>
-                <td class="meta-val" style="color:#00F2FE;font-weight:700;">48.2 cm³</td>
+                <td class="meta-val" style="color:#00F2FE;font-weight:700;">~{_wt_ml:.1f} mL ({_reg["WT"]["voxels"]:,} vox)</td>
             </tr>
             <tr>
                 <td class="meta-key">AI Confidence Score</td>
-                <td class="meta-val" style="color:#34D399;font-weight:700;">96.4%</td>
+                <td class="meta-val" style="color:#64748B;font-weight:700;">N/A &mdash; no trained model</td>
             </tr>
             <tr>
                 <td class="meta-key">Inference Mode</td>
@@ -148,7 +171,7 @@ with col_main:
             </tr>
             <tr>
                 <td class="meta-key">Federation Round</td>
-                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">Round 50 / 50 ✓</td>
+                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">not run</td>
             </tr>
         </table>
     </div>
@@ -158,10 +181,8 @@ with col_main:
     st.markdown('<div class="panel"><div class="panel-title">🧠 Tumor Subregion Breakdown</div>', unsafe_allow_html=True)
 
     regions = [
-        ("Peritumoral Edema (ED)", 48.6, "#EAB308"),
-        ("Enhancing Tumor (ET)",   24.2, "#EF4444"),
-        ("Cystic Component (CC)",  18.1, "#3B82F6"),
-        ("Non-enhancing (NET)",     9.1, "#10B981"),
+        (r["name"], r["pct_of_tumor"], r["color"])
+        for r in sorted(be.subregion_stats(_seg), key=lambda x: -x["pct_of_tumor"])
     ]
     for name, pct, color in regions:
         st.markdown(f"""
@@ -171,38 +192,48 @@ with col_main:
                     <div class="seg-dot" style="background:{color};box-shadow:0 0 6px {color}66;"></div>
                     {name}
                 </div>
-                <span class="seg-pct" style="color:{color};">{pct}%</span>
+                <span class="seg-pct" style="color:{color};">{pct:.1f}%</span>
             </div>
             <div class="seg-bar-bg">
-                <div class="seg-bar" style="width:{min(pct*2,100)}%;background:linear-gradient(90deg,{color}cc,{color});"></div>
+                <div class="seg-bar" style="width:{min(pct,100):.1f}%;background:linear-gradient(90deg,{color}cc,{color});"></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # AI interpretation
-    st.markdown("""
+    # Measured description. Deliberately NOT a clinical interpretation: no trained
+    # model exists, and inferring pathology from voxel counts would be fabrication.
+    _lines = "".join(
+        f'<li><b style="color:{r["color"]};">{r["name"]}</b>: {r["pct_of_tumor"]:.1f}% of tumor '
+        f'volume ({r["voxels"]:,} voxels, ~{r["volume_ml"]:.1f} mL)</li>'
+        for r in be.subregion_stats(_seg) if r["voxels"] > 0
+    )
+    _absent = [r["name"] for r in be.subregion_stats(_seg) if r["voxels"] == 0]
+    _absent_txt = (
+        f'<br><br>Absent in this subject: {", ".join(_absent)}.' if _absent else ""
+    )
+    st.markdown(f"""
     <div class="panel">
-        <div class="panel-title">🩺 AI Clinical Interpretation</div>
+        <div class="panel-title">📐 Measured Segmentation Summary</div>
         <div class="interp-box">
-            The federated 3D U-Net model identified abnormal regional signal characteristics consistent with
-            pediatric brain tumor morphology across all four MRI modalities. Substantial
-            <b style="color:#EAB308;">peritumoral edema (ED)</b> is present surrounding the enhancing core,
-            occupying 48.6% of the segmented volume and verified across multi-institutional cross-validation.
+            Measured directly from <b>{_sid}</b>'s expert ground-truth mask
+            ({_cohort_name} cohort). These are voxel counts, not model output.
+            <ul style="margin:12px 0 0 18px;line-height:1.9;">{_lines}</ul>
+            {_absent_txt}
             <br><br>
-            The <b style="color:#EF4444;">enhancing tumor (ET)</b> region (24.2%) demonstrates contrast
-            uptake on T1c consistent with active blood-brain barrier disruption. A
-            <b style="color:#3B82F6;">cystic/necrotic component (CC)</b> of 18.1% is identified within
-            the tumor core. The AI confidence score of <b style="color:#34D399;">96.4%</b> reflects
-            high-certainty predictions across all subregion boundaries.
+            Official evaluation regions &mdash;
+            <b>ET</b> {_reg["ET"]["voxels"]:,} vox ·
+            <b>NC</b> {_reg["NC"]["voxels"]:,} vox ·
+            <b>WT</b> {_reg["WT"]["voxels"]:,} vox.
+            <br><br>
+            <span style="color:#FCD34D;">No clinical interpretation is offered here.
+            {_status.detail} Any diagnostic reading of these numbers must come from a
+            qualified clinician, not this demo.</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════
-#  RIGHT — confidence + export
-# ══════════════════════════════════════════════════════
 with col_side:
 
     # Confidence ring
@@ -211,11 +242,11 @@ with col_side:
         <div class="panel-title" style="justify-content:center;">📊 Model Confidence</div>
         <div class="conf-ring">
             <div class="conf-inner">
-                <div class="conf-num">96.4%</div>
-                <div class="conf-label">Confidence</div>
+                <div class="conf-num" style="font-size:1.6rem;">N/A</div>
+                <div class="conf-label">No trained model</div>
             </div>
         </div>
-        <div style="font-size:0.75rem;color:#64748B;margin-top:4px;">Federated ensemble score<br>across 5 hospital nodes</div>
+        <div style="font-size:0.72rem;color:#64748B;margin-top:4px;">A confidence score requires<br>trained weights, which do not exist yet</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -225,15 +256,15 @@ with col_side:
         <div class="panel-title">⚡ Quick Stats</div>
         <table class="meta-table">
             <tr><td class="meta-key">Dice Score</td>
-                <td class="meta-val" style="color:#38BDF8;font-family:monospace;">96.2%</td></tr>
+                <td class="meta-val" style="color:#64748B;font-family:monospace;">&mdash;</td></tr>
             <tr><td class="meta-key">IoU</td>
-                <td class="meta-val" style="color:#818CF8;font-family:monospace;">91.8%</td></tr>
+                <td class="meta-val" style="color:#64748B;font-family:monospace;">&mdash;</td></tr>
             <tr><td class="meta-key">HD95</td>
-                <td class="meta-val" style="color:#34D399;font-family:monospace;">4.8 mm</td></tr>
+                <td class="meta-val" style="color:#64748B;font-family:monospace;">&mdash;</td></tr>
             <tr><td class="meta-key">Sensitivity</td>
-                <td class="meta-val" style="font-family:monospace;">95.4%</td></tr>
+                <td class="meta-val" style="font-family:monospace;color:#64748B;">&mdash;</td></tr>
             <tr><td class="meta-key">Specificity</td>
-                <td class="meta-val" style="font-family:monospace;">97.9%</td></tr>
+                <td class="meta-val" style="font-family:monospace;color:#64748B;">&mdash;</td></tr>
         </table>
     </div>
     """, unsafe_allow_html=True)

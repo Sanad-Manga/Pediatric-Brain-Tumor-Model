@@ -8,7 +8,7 @@ def generate_pdf_summary(patient_id, statistics):
     Total Tumor Volume: {statistics.get('total_volume', '48.2')} cm³
     Enhancing Tumor (ET): {statistics.get('et', '24.2')}%
     Edema (ED): {statistics.get('ed', '48.6')}%
-    Confidence: {statistics.get('confidence', '96.4')}%
-    Status: Verified & Validated
+    Confidence: {statistics.get('confidence', 'n/a - no trained model')}
+    Status: UNVALIDATED - no trained checkpoint exists
     """
     return report_content.encode('utf-8')

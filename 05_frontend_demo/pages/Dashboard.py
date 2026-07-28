@@ -1,6 +1,34 @@
 import streamlit as st
 import pandas as pd
 import time
+import torch
+
+import backend as be
+
+
+@st.cache_data(show_spinner="Reading cohort from manifests…")
+def _cohort_facts():
+    """Real counts from the manifests, plus real tumor stats for a few subjects."""
+    subs = be.list_subjects()
+    counts = {k: len(v) for k, v in subs.items()}
+    rows = []
+    for cohort, ids in subs.items():
+        for sid in ids[:2]:  # a small real sample, not an invented case list
+            seg = be.load_volume(sid).seg
+            regions = {r["region"]: r for r in be.region_stats(seg)}
+            rows.append({
+                "Subject ID": sid,
+                "Cohort": cohort,
+                "Tumor voxels": f"{regions['WT']['voxels']:,}",
+                "Volume (est.)": f"{regions['WT']['volume_ml']:.1f} mL",
+                "ET present": "yes" if regions["ET"]["present"] else "no",
+            })
+    return counts, sum(counts.values()), pd.DataFrame(rows)
+
+
+_COUNTS, _TOTAL, _CASES = _cohort_facts()
+_STATUS = be.model_status()
+_DEVICE = "CUDA" if torch.cuda.is_available() else "CPU"
 
 # ──────────────────────────────────────────────────────────
 #  PAGE-LEVEL CSS (inherits global theme from app.py)
@@ -298,35 +326,41 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────
 #  STAT CARDS
 # ──────────────────────────────────────────────────────────
-st.markdown("""
+_model_value = "Trained" if _STATUS.trained else "Untrained"
+_model_delta = (
+    f'<div class="stat-delta up">↑ {_STATUS.checkpoint.name}</div>' if _STATUS.trained
+    else '<div class="stat-delta info">architecture loaded · no checkpoint</div>'
+)
+
+st.markdown(f"""
 <div class="stat-grid">
     <div class="stat-card cyan">
         <div class="stat-card-accent"></div>
         <div class="stat-icon">🤖</div>
         <div class="stat-label">AI Model</div>
-        <div class="stat-value">Online</div>
-        <div class="stat-delta up">↑ All systems ready</div>
+        <div class="stat-value">{_model_value}</div>
+        {_model_delta}
     </div>
     <div class="stat-card violet">
         <div class="stat-card-accent"></div>
         <div class="stat-icon">🌐</div>
-        <div class="stat-label">Federated Clients</div>
-        <div class="stat-value">5</div>
-        <div class="stat-delta up">↑ +1 site this week</div>
+        <div class="stat-label">Simulated Clients</div>
+        <div class="stat-value">2</div>
+        <div class="stat-delta info">Hospital A · Hospital B (+1 held-out site)</div>
     </div>
     <div class="stat-card green">
         <div class="stat-card-accent"></div>
         <div class="stat-icon">🗂</div>
-        <div class="stat-label">BraTS-PEDs Subjects</div>
-        <div class="stat-value">257</div>
-        <div class="stat-delta info">T1 · T1c · T2 · FLAIR</div>
+        <div class="stat-label">Cached Subjects</div>
+        <div class="stat-value">{_TOTAL}</div>
+        <div class="stat-delta info">t1c · t1n · t2f · t2w</div>
     </div>
     <div class="stat-card amber">
         <div class="stat-card-accent"></div>
         <div class="stat-icon">⚡</div>
-        <div class="stat-label">Inference Mode</div>
-        <div class="stat-value">FP16</div>
-        <div class="stat-delta info">Mixed precision · GPU</div>
+        <div class="stat-label">Inference Device</div>
+        <div class="stat-value">{_DEVICE}</div>
+        <div class="stat-delta info">96³ volumes · batch size 1</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -451,38 +485,55 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────
 #  PERFORMANCE METRICS
 # ──────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="section-heading">
     <div class="section-heading-icon">📈</div>
     <div>
         <div class="section-heading-text">Model Performance</div>
-        <div class="section-heading-sub">Validated on BraTS-PEDs held-out test set · 257 subjects</div>
-    </div>
-</div>
-
-<div class="perf-grid">
-    <div class="perf-card">
-        <div class="perf-num">96.2%</div>
-        <div class="perf-name">Dice Score</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:96.2%"></div></div>
-    </div>
-    <div class="perf-card">
-        <div class="perf-num">91.8%</div>
-        <div class="perf-name">IoU</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:91.8%"></div></div>
-    </div>
-    <div class="perf-card">
-        <div class="perf-num">95.4%</div>
-        <div class="perf-name">Sensitivity</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:95.4%"></div></div>
-    </div>
-    <div class="perf-card">
-        <div class="perf-num">97.9%</div>
-        <div class="perf-name">Specificity</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:97.9%"></div></div>
+        <div class="section-heading-sub">
+            Official BraTS-PEDs regions, scored on the {_COUNTS['Held-out']}-subject held-out institution
+        </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+_dice = be.heldout_dice()
+
+if _dice is not None:
+    # Real numbers, produced by 03_augmentation_eval's ablation runner.
+    st.markdown(
+        '<div class="perf-grid">' + "".join(
+            f"""<div class="perf-card">
+                <div class="perf-num">{v * 100:.1f}%</div>
+                <div class="perf-name">Dice {k}</div>
+                <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:{v * 100:.1f}%"></div></div>
+            </div>"""
+            for k, v in _dice.items()
+        ) + "</div>", unsafe_allow_html=True)
+    st.caption(
+        f"Source: `03_augmentation_eval/results/ablation_results.csv` "
+        f"({len(be.ablation_results())} evaluated run(s))."
+        + ("" if _STATUS.trained else "  ⚠ Logged from an UNTRAINED checkpoint — not model performance.")
+    )
+else:
+    st.markdown(f"""
+    <div style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.35);
+                border-radius:14px;padding:22px 26px;">
+        <div style="font-size:0.95rem;font-weight:700;color:#FDE68A;margin-bottom:10px;">
+            ⚠ No performance figures yet — the model has not been trained
+        </div>
+        <div style="font-size:0.84rem;color:#FCD34D;line-height:1.8;">
+            The 3D U-Net architecture from <code>01_model_federated</code> loads and runs, but no
+            checkpoint exists on disk, so its weights are randomly initialized. Any Dice, IoU,
+            sensitivity or specificity shown here would be invented, so nothing is shown.
+            <br><br>
+            Real per-region Dice (ET / NC / WT) appears automatically once a checkpoint exists —
+            set <code>NEUROFED_CHECKPOINT</code>, or drop one under <code>checkpoints/</code>.
+            The evaluation path is already built and tested in
+            <code>03_augmentation_eval</code>.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────
 #  DATASET + RECENT CASES  (2-column)
@@ -511,13 +562,18 @@ with col_l:
                 <td style="padding:10px 0;color:#F3F4F6;font-weight:600;">BraTS-PEDs 2024</td>
             </tr>
             <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
-                <td style="padding:10px 0;color:#64748B;">Subjects</td>
-                <td style="padding:10px 0;color:#38BDF8;font-weight:700;font-family:'JetBrains Mono',monospace;">257</td>
+                <td style="padding:10px 0;color:#64748B;">Subjects (cached)</td>
+                <td style="padding:10px 0;color:#38BDF8;font-weight:700;font-family:'JetBrains Mono',monospace;">""" + f"""{_TOTAL}</td>
+            </tr>
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                <td style="padding:10px 0;color:#64748B;">Split</td>
+                <td style="padding:10px 0;color:#F3F4F6;font-family:'JetBrains Mono',monospace;font-size:0.78rem;">
+                    A {_COUNTS['Hospital A']} · B {_COUNTS['Hospital B']} · held-out {_COUNTS['Held-out']}</td>
             </tr>
             <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
                 <td style="padding:10px 0;color:#64748B;">Modalities</td>
-                <td style="padding:10px 0;color:#F3F4F6;font-family:'JetBrains Mono',monospace;">T1 · T1c · T2 · FLAIR</td>
-            </tr>
+                <td style="padding:10px 0;color:#F3F4F6;font-family:'JetBrains Mono',monospace;">t1c · t1n · t2f · t2w</td>
+            </tr>""" + """
             <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
                 <td style="padding:10px 0;color:#64748B;">Volume Shape</td>
                 <td style="padding:10px 0;color:#F3F4F6;font-family:'JetBrains Mono',monospace;">96 × 96 × 96</td>
@@ -535,19 +591,16 @@ with col_l:
     """, unsafe_allow_html=True)
 
 with col_r:
-    cases_df = pd.DataFrame({
-        "Patient ID":   ["PED_0042", "PED_0017", "PED_0035", "PED_0008", "PED_0061"],
-        "Modality":     ["T1c · FLAIR", "T1 · T2", "T1c · T2", "FLAIR", "T1c · FLAIR"],
-        "Status":       ["✅ Completed", "✅ Completed", "✅ Validated", "✅ Completed", "⏳ Processing"],
-        "Confidence":   ["96.4%", "95.8%", "97.1%", "94.9%", "—"],
-    })
-    st.dataframe(
-        cases_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Confidence": st.column_config.TextColumn("Confidence"),
-        }
+    st.markdown(
+        '<div style="font-size:0.78rem;font-family:\'JetBrains Mono\',monospace;'
+        'text-transform:uppercase;letter-spacing:0.07em;color:#64748B;margin-bottom:10px;">'
+        'Real Subjects · Ground-Truth Tumor Burden</div>',
+        unsafe_allow_html=True,
+    )
+    st.dataframe(_CASES, use_container_width=True, hide_index=True)
+    st.caption(
+        "Real subject IDs and real tumor volumes measured from the ground-truth masks. "
+        "No confidence column: confidence would require a trained model."
     )
 
 # ──────────────────────────────────────────────────────────

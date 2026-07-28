@@ -1,4 +1,6 @@
 import streamlit as st
+
+import backend as be
 import plotly.graph_objects as go
 import pandas as pd
 
@@ -50,12 +52,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Benchmark metrics
-st.markdown("""
+_d = be.heldout_dice()
+if _d is None:
+    st.warning("Benchmark numbers below are ILLUSTRATIVE PLACEHOLDERS. No trained checkpoint exists, so no Dice / HD95 / IoU has been measured.", icon="⚠️")
+
+_mean = f"{sum(_d.values())/3*100:.1f}%" if _d else "—"
+
+st.markdown(f"""
 <div class="metric-grid">
     <div class="metric-box">
-        <div class="metric-val" style="background:linear-gradient(135deg,#fff,#38BDF8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">92.4%</div>
+        <div class="metric-val" style="background:linear-gradient(135deg,#fff,#38BDF8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">{_mean}</div>
         <div class="metric-label">Mean Dice Score</div>
-        <div class="metric-bar-bg"><div class="metric-bar" style="width:92.4%;background:linear-gradient(90deg,#38BDF8,#00F2FE);"></div></div>
+        <div class="metric-bar-bg"><div class="metric-bar" style="width:0%;background:linear-gradient(90deg,#38BDF8,#00F2FE);"></div></div>
     </div>
     <div class="metric-box">
         <div class="metric-val" style="background:linear-gradient(135deg,#fff,#00F2FE);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">4.8mm</div>

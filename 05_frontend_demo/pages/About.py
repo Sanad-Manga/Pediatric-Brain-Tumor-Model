@@ -105,7 +105,7 @@ st.markdown("""
     <div class="timeline">
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 1 — Dataset Curation</div>
-            <div class="tl-desc">BraTS-PEDs 2024 acquisition: 257 pediatric subjects across 4 MRI modalities with expert annotations.</div>
+            <div class="tl-desc">BraTS-PEDs 2024: 257 labelled subjects exist upstream; 227 are resampled into the shared 96-cube cache and used here (53 / 92 / 82).</div>
         </div>
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 2 — Centralized Baseline</div>

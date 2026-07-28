@@ -1,6 +1,8 @@
-import streamlit as st
-import plotly.graph_objects as go
 import numpy as np
+import plotly.graph_objects as go
+import streamlit as st
+
+import backend as be
 
 st.set_page_config(page_title="MRI Analysis Studio | NeuroFed AI", page_icon="🖥️", layout="wide")
 
@@ -17,14 +19,6 @@ st.markdown("""
 .page-sub { color:#94A3B8; font-size:0.92rem; }
 .panel { background:rgba(15,23,42,0.55); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:24px; }
 .panel-title { font-size:0.9rem; font-weight:700; color:#F3F4F6; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
-.upload-zone {
-    border:2px dashed rgba(56,189,248,0.25); border-radius:12px;
-    padding:24px; text-align:center; margin-bottom:16px;
-    background:rgba(56,189,248,0.03);
-    transition: border-color .2s ease;
-}
-.upload-zone:hover { border-color:rgba(56,189,248,0.5); }
-.upload-hint { font-size:0.75rem; color:#64748B; margin-top:6px; }
 .divider-line { height:1px; background:rgba(255,255,255,0.07); margin:16px 0; }
 .subregion-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
 .subregion-left { display:flex; align-items:center; gap:10px; }
@@ -41,106 +35,168 @@ st.markdown("""
 }
 .status-left { color:#38BDF8; }
 .status-right { color:#64748B; }
-.status-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
-    background:#34D399; margin-right:6px; animation:pulseDot 1.8s infinite; }
-@keyframes pulseDot {
-    0%  { box-shadow:0 0 0 0 rgba(52,211,153,.6); }
-    70% { box-shadow:0 0 0 6px rgba(52,211,153,0); }
-    100%{ box-shadow:0 0 0 0 rgba(52,211,153,0); }
+.warn-box {
+    background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.35);
+    border-radius:12px; padding:14px 18px; margin-top:18px;
+    font-size:0.82rem; color:#FDE68A; line-height:1.7;
+}
+.real-box {
+    background:rgba(52,211,153,0.07); border:1px solid rgba(52,211,153,0.3);
+    border-radius:10px; padding:10px 14px; margin-top:12px;
+    font-size:0.72rem; color:#A7F3D0; font-family:'JetBrains Mono',monospace;
 }
 </style>
 
 <div class="page-hero">
     <div class="page-title">MRI Analysis Studio</div>
-    <div class="page-sub">Multi-modality radiological workspace with 3D U-Net segmentation overlays and real-time inference.</div>
+    <div class="page-sub">Multi-modality radiological workspace over the real BraTS-PEDs 96³ cache.</div>
 </div>
 """, unsafe_allow_html=True)
+
+if not be.cache_available():
+    st.error(
+        f"Cache directory not found: `{be.CACHE_DIR}`\n\n"
+        "Set the `NEUROFED_CACHE` environment variable to the shared 96-cube cache."
+    )
+    st.stop()
+
+
+@st.cache_data(show_spinner="Loading volume from cache…")
+def _load(subject_id: str):
+    v = be.load_volume(subject_id)
+    return v.raw, v.seg, v.cohort
+
+
+@st.cache_data(show_spinner="Running 3D U-Net inference…")
+def _infer(subject_id: str):
+    v = be.load_volume(subject_id)
+    out = be.run_inference(v)
+    return out["pred_seg"], out["dice"]
+
+
+subjects = be.list_subjects()
+status = be.model_status()
 
 col_ctrl, col_view = st.columns([1, 2], gap="medium")
 
 with col_ctrl:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">📁 Volume Input</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-title">📁 Subject Selection</div>', unsafe_allow_html=True)
 
-    uploaded = st.file_uploader("Upload NIfTI Volume (.nii / .nii.gz)", type=["nii", "gz"],
-                                 label_visibility="collapsed")
-    st.markdown('<div class="upload-hint">Supports .nii and .nii.gz · Max 500 MB</div>', unsafe_allow_html=True)
+    cohort = st.selectbox("Cohort", list(subjects.keys()), index=2,
+                          help="Hospital A / B are the training clients; Held-out is the test institution")
+    subject_id = st.selectbox("Subject", subjects[cohort],
+                              help="Real subject IDs, read from the shared manifests")
 
-    modality = st.selectbox("MRI Modality", ["T1", "T1c (Contrast)", "T2", "FLAIR"],
-                             help="Select the MRI sequence to visualize")
-    slice_idx = st.slider("Axial Slice", 0, 155, 77,
-                           help="Navigate through axial slices of the 3D volume")
-    overlay = st.toggle("Show Segmentation Overlay", value=True)
+    raw, seg, cohort_name = _load(subject_id)
+
+    modality = st.selectbox("MRI Modality", list(be.MODALITIES), index=0,
+                            format_func=lambda m: be.MODALITY_LABELS[m])
+    plane = st.radio("Plane", ["Axial", "Coronal", "Sagittal"], horizontal=True)
+
+    extent = be.plane_extent(seg.shape, plane)
+    default_slice = be.busiest_slice(seg, plane)
+    slice_idx = st.slider(f"{plane} slice", 0, extent - 1, default_slice,
+                          help=f"Defaults to the slice with the most tumor ({default_slice})")
+
+    overlay_mode = st.radio(
+        "Overlay",
+        ["Ground truth", "Model prediction", "None"],
+        help="Ground truth is the real expert annotation. Model prediction runs the real 3D U-Net.",
+    )
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.markdown('<div class="panel-title">🧠 Subregion Statistics</div>', unsafe_allow_html=True)
+    st.caption("Measured from this subject's ground-truth mask.")
 
-    regions = [
-        ("Enhancing Tumor (ET)", 24.2, "#EF4444"),
-        ("Peritumoral Edema (ED)", 48.6, "#EAB308"),
-        ("Cystic Component (CC)", 18.1, "#3B82F6"),
-        ("Non-enhancing (NET)", 9.1, "#10B981"),
-    ]
-    for name, pct, color in regions:
+    for row in be.subregion_stats(seg):
+        pct = row["pct_of_tumor"]
         st.markdown(f"""
         <div style="margin-bottom:12px;">
             <div class="subregion-row">
                 <div class="subregion-left">
-                    <div class="subregion-dot" style="background:{color};box-shadow:0 0 6px {color}55;"></div>
-                    <span class="subregion-name">{name}</span>
+                    <div class="subregion-dot" style="background:{row['color']};box-shadow:0 0 6px {row['color']}55;"></div>
+                    <span class="subregion-name">{row['name']}</span>
                 </div>
-                <span class="subregion-pct" style="color:{color};">{pct}%</span>
+                <span class="subregion-pct" style="color:{row['color']};">{pct:.1f}%</span>
             </div>
             <div class="subregion-bar-bg">
-                <div class="subregion-bar" style="width:{pct*2}%;background:{color};"></div>
+                <div class="subregion-bar" style="width:{min(pct, 100):.1f}%;background:{row['color']};"></div>
+            </div>
+            <div style="font-size:0.66rem;color:#64748B;font-family:'JetBrains Mono',monospace;margin-top:3px;">
+                {row['voxels']:,} voxels · ~{row['volume_ml']:.1f} mL
             </div>
         </div>
         """, unsafe_allow_html=True)
 
+    total_vox = int((seg > 0).sum())
+    st.markdown(
+        f'<div class="real-box">Whole tumor: {total_vox:,} voxels · '
+        f'~{total_vox * be.VOXEL_MM3 / 1000:.1f} mL (est.)</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col_view:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">🖥️ Interactive Viewer & Segmentation Overlay</div>', unsafe_allow_html=True)
+    st.markdown('<div class="panel-title">🖥️ Interactive Viewer</div>', unsafe_allow_html=True)
 
-    np.random.seed(slice_idx)
-    base = np.random.rand(96, 96) * 0.6
-    # simulate tumor blobs
-    cx, cy = 48, 52
-    for i in range(96):
-        for j in range(96):
-            d = ((i-cx)**2 + (j-cy)**2)**0.5
-            if d < 18: base[i,j] += 0.4 * max(0, 1 - d/18)
-            if d < 10: base[i,j] += 0.3
-
+    img_slice = be.slice_of(raw[modality], slice_idx, plane).T
     fig = go.Figure()
-    fig.add_trace(go.Heatmap(z=base, colorscale='Greys', showscale=False, opacity=1.0))
-    if overlay:
-        overlay_z = np.zeros((96, 96))
-        for i in range(96):
-            for j in range(96):
-                d = ((i-cx)**2 + (j-cy)**2)**0.5
-                if d < 8:  overlay_z[i,j] = 3
-                elif d < 13: overlay_z[i,j] = 1
-                elif d < 18: overlay_z[i,j] = 2
-        fig.add_trace(go.Heatmap(z=overlay_z, colorscale=[
-            [0,'rgba(0,0,0,0)'], [0.01,'rgba(239,68,68,0)'],
-            [0.33,'rgba(59,130,246,0.45)'], [0.66,'rgba(234,179,8,0.45)'],
-            [1.0,'rgba(239,68,68,0.55)']
-        ], showscale=False, opacity=0.75))
+    fig.add_trace(go.Heatmap(z=img_slice, colorscale="Greys_r", showscale=False, hoverinfo="skip"))
+
+    mask_source = None
+    dice_scores = None
+    if overlay_mode == "Ground truth":
+        mask_source = seg
+    elif overlay_mode == "Model prediction":
+        mask_source, dice_scores = _infer(subject_id)
+
+    if mask_source is not None:
+        mask_slice = be.slice_of(mask_source, slice_idx, plane).T
+        # One trace per class so overlay colours map exactly to label IDs.
+        for label, colour in be.CLASS_COLORS.items():
+            m = np.where(mask_slice == label, 1.0, np.nan)
+            fig.add_trace(go.Heatmap(
+                z=m, colorscale=[[0, colour], [1, colour]],
+                showscale=False, opacity=0.55, hoverinfo="skip",
+            ))
 
     fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=0,r=0,t=0,b=0), height=420,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=0, b=0), height=460,
         xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, scaleanchor='x')
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, scaleanchor="x"),
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    tumor_in_slice = int((be.slice_of(seg, slice_idx, plane) > 0).sum())
     st.markdown(f"""
     <div class="viewer-status">
-        <div class="status-left"><span class="status-dot"></span>Inference Ready · FP16 · Slice {slice_idx}/155</div>
-        <div class="status-right">Federated 3D U-Net + CORAL · {modality}</div>
+        <div class="status-left">{subject_id} · {cohort_name} · {plane} {slice_idx}/{extent - 1}</div>
+        <div class="status-right">{be.MODALITY_LABELS[modality]} · {tumor_in_slice:,} tumor voxels in slice</div>
     </div>
     """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+    if dice_scores is not None:
+        if status.trained:
+            st.markdown("#### Per-region Dice vs ground truth")
+            c1, c2, c3 = st.columns(3)
+            for col, region in zip((c1, c2, c3), ("ET", "NC", "WT")):
+                col.metric(region, f"{dice_scores[region]:.3f}")
+            st.caption(f"Checkpoint: `{status.checkpoint.name}`")
+        else:
+            st.markdown(f"""
+            <div class="warn-box">
+                <b>⚠ This prediction is meaningless — no trained model exists yet.</b><br>
+                {status.detail}<br><br>
+                Real measured Dice against this subject's ground truth:
+                <b>ET {dice_scores['ET']:.3f} · NC {dice_scores['NC']:.3f} · WT {dice_scores['WT']:.3f}</b>
+                — essentially zero, which is exactly what randomly initialized weights
+                should produce. It is shown rather than hidden so the state is unambiguous.<br><br>
+                Switch the overlay to <b>Ground truth</b> for the real expert annotation.
+                Once <code>01_model_federated</code> produces a checkpoint, set
+                <code>NEUROFED_CHECKPOINT</code> and this panel becomes real numbers automatically.
+            </div>
+            """, unsafe_allow_html=True)
