@@ -96,6 +96,10 @@ def train_federated(
 
         coral_round_loss = None
         if config.use_domain_adaptation:
+            if len(client_manifest_paths) != 2:
+                raise ValueError(
+                    "Domain adaptation currently supports exactly 2 client manifests (Hospital A and Hospital B)."
+                )
             coral_round_loss = train_coral_alignment(
                 global_model, config, client_manifest_paths[0], client_manifest_paths[1]
             )
