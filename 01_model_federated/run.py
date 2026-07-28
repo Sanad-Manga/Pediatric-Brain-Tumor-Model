@@ -27,6 +27,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--epochs", type=int, default=1, help="Epochs (single-client) or local epochs per round (federated)")
     p.add_argument("--rounds", type=int, default=2, help="Federated rounds (ignored for single-client)")
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--coral-weight", type=float, default=1.0)
+    p.add_argument("--coral-queue-size", type=int, default=8)
+    p.add_argument("--coral-steps-per-round", type=int, default=None)
     p.add_argument("--checkpoint-dir", default="checkpoints")
     p.add_argument("--resume", action="store_true")
     return p
@@ -42,6 +45,9 @@ def main() -> None:
         data_mode=args.data_mode,
         cache_path=args.cache_path,
         lr=args.lr,
+        coral_weight=args.coral_weight,
+        coral_queue_size=args.coral_queue_size,
+        coral_steps_per_round=args.coral_steps_per_round,
         run_id=args.run_id,
         checkpoint_dir=args.checkpoint_dir,
     )
