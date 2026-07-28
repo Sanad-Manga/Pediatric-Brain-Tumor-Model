@@ -1,9 +1,22 @@
 import streamlit as st
 import pandas as pd
 import time
-import torch
 
 import backend as be
+
+
+@st.cache_resource(show_spinner=False)
+def _device_label() -> str:
+    """Import torch lazily.
+
+    This is the app's landing page. Importing torch (and, through backend, monai)
+    at module scope makes the entry script's first render slow enough that the
+    sidebar does not come up cleanly on a cold session. Nothing on this page
+    needs a tensor - only the device name - so the import is deferred.
+    """
+    import torch
+
+    return "CUDA" if torch.cuda.is_available() else "CPU"
 
 
 @st.cache_data(show_spinner=False)
@@ -40,7 +53,7 @@ def _sample_cases(per_cohort: int = 2):
 
 _COUNTS, _TOTAL = _cohort_counts()
 _STATUS = be.model_status()
-_DEVICE = "CUDA" if torch.cuda.is_available() else "CPU"
+_DEVICE = _device_label()
 
 # ──────────────────────────────────────────────────────────
 #  PAGE-LEVEL CSS (inherits global theme from app.py)
