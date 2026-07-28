@@ -9,4 +9,7 @@ def load_mri_volume(file_path_or_buffer):
 
 def load_federated_weights():
     """Interface to load federated model checkpoints from 01_model_federated backend."""
-    return {"status": "Loaded", "rounds": 10, "global_dice": 0.924}
+    raise NotImplementedError(
+        "No trained federated checkpoint exists yet. Use backend.model_status() to "
+        "check availability and backend.heldout_dice() for real evaluated numbers."
+    )

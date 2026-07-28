@@ -3,6 +3,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
+import backend as be
+
 st.set_page_config(page_title="Federated Observatory | NeuroFed AI", page_icon="🌐", layout="wide")
 
 st.markdown("""
@@ -59,54 +61,56 @@ st.markdown("""
 
 <div class="page-hero">
     <div class="page-title">Federated Learning Observatory</div>
-    <div class="page-sub">Live cross-institutional training telemetry and FedAvg convergence monitor across 5 hospital nodes.</div>
+    <div class="page-sub">FedAvg topology across the two simulated hospital clients and the held-out validation site.</div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Federation summary stats
-st.markdown("""
+_counts = {k: len(v) for k, v in be.list_subjects().items()}
+_total = sum(_counts.values())
+_dice = be.heldout_dice()
+_dice_cell = f"{_dice['WT'] * 100:.1f}%" if _dice else "—"
+
+# ── Federation summary stats (real cohort counts; Dice only if a run exists)
+st.markdown(f"""
 <div class="fed-stats-row">
-    <div class="fed-stat"><div class="fed-stat-val">50</div><div class="fed-stat-label">Training Rounds</div></div>
-    <div class="fed-stat"><div class="fed-stat-val">5</div><div class="fed-stat-label">Active Nodes</div></div>
-    <div class="fed-stat"><div class="fed-stat-val">257</div><div class="fed-stat-label">Total Subjects</div></div>
-    <div class="fed-stat"><div class="fed-stat-val" style="background:linear-gradient(135deg,#fff,#34D399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">92.4%</div><div class="fed-stat-label">Global Dice</div></div>
+    <div class="fed-stat"><div class="fed-stat-val">0</div><div class="fed-stat-label">Rounds Completed</div></div>
+    <div class="fed-stat"><div class="fed-stat-val">2</div><div class="fed-stat-label">Training Clients</div></div>
+    <div class="fed-stat"><div class="fed-stat-val">{_total}</div><div class="fed-stat-label">Cached Subjects</div></div>
+    <div class="fed-stat"><div class="fed-stat-val" style="background:linear-gradient(135deg,#fff,#34D399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">{_dice_cell}</div><div class="fed-stat-label">Global Dice (WT)</div></div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Node cards
-st.markdown("""
+st.warning(
+    "No federated training has been run yet. Round counts, per-node Dice and the "
+    "convergence curve below are ILLUSTRATIVE PLACEHOLDERS showing the intended shape "
+    "of the output — they are not measurements. Cohort counts are real.",
+    icon="⚠️",
+)
+
+# ── Node cards. Only three cohorts exist; there is no Hospital C or D, and no real
+# site or scanner metadata exists in this dataset (the A/B split was derived by
+# clustering intensity features — see 00_shared/CONTRACTS.md).
+st.markdown(f"""
 <div class="panel">
-    <div class="panel-title">🏥 Hospital Node Status</div>
-    <div class="node-grid">
+    <div class="panel-title">🏥 Simulated Client Status</div>
+    <div class="node-grid" style="grid-template-columns:repeat(3,1fr);">
         <div class="node-card active">
-            <div class="node-status active"><span class="dot active"></span>Training</div>
+            <div class="node-status active"><span class="dot active"></span>Training client</div>
             <div class="node-name">Hospital A</div>
-            <div class="node-stat">53 patients · Siemens 3T</div>
-            <div class="node-dice">Dice 91.2%</div>
+            <div class="node-stat">{_counts['Hospital A']} subjects · site metadata not available</div>
+            <div class="node-dice">Dice —</div>
         </div>
         <div class="node-card active">
-            <div class="node-status active"><span class="dot active"></span>Training</div>
+            <div class="node-status active"><span class="dot active"></span>Training client</div>
             <div class="node-name">Hospital B</div>
-            <div class="node-stat">92 patients · GE 1.5T</div>
-            <div class="node-dice">Dice 92.8%</div>
-        </div>
-        <div class="node-card active">
-            <div class="node-status active"><span class="dot active"></span>Training</div>
-            <div class="node-name">Hospital C</div>
-            <div class="node-stat">48 patients · Philips 3T</div>
-            <div class="node-dice">Dice 90.5%</div>
-        </div>
-        <div class="node-card syncing">
-            <div class="node-status syncing"><span class="dot syncing"></span>Syncing</div>
-            <div class="node-name">Hospital D</div>
-            <div class="node-stat">38 patients · Siemens 1.5T</div>
-            <div class="node-dice">Dice 89.9%</div>
+            <div class="node-stat">{_counts['Hospital B']} subjects · site metadata not available</div>
+            <div class="node-dice">Dice —</div>
         </div>
         <div class="node-card holdout">
-            <div class="node-status holdout"><span class="dot holdout"></span>Validation</div>
+            <div class="node-status holdout"><span class="dot holdout"></span>Validation only</div>
             <div class="node-name">Held-out Site</div>
-            <div class="node-stat">82 patients · Mixed</div>
-            <div class="node-dice">Dice 92.4%</div>
+            <div class="node-stat">{_counts['Held-out']} subjects · never trained on</div>
+            <div class="node-dice">Dice {_dice_cell}</div>
         </div>
     </div>
 </div>
@@ -115,9 +119,11 @@ st.markdown("""
 # ── Convergence chart
 st.markdown("""
 <div class="panel">
-    <div class="panel-title">📈 Global Convergence — FedAvg Rounds</div>
+    <div class="panel-title">📈 Global Convergence — FedAvg Rounds <span style="color:#FBBF24;font-size:0.72rem;font-weight:600;">(ILLUSTRATIVE PLACEHOLDER · NOT MEASURED)</span></div>
 """, unsafe_allow_html=True)
 
+# Synthetic shape only - no federated run has happened. Replace with real
+# per-round Dice once 01_model_federated logs it.
 rounds = list(range(1, 51))
 global_dice  = [0.50 + 0.424 * (1 - 2.5**(-r/10)) for r in rounds]
 site_a_dice  = [g - 0.01 + 0.008*((r%5)/5) for r,g in zip(rounds,global_dice)]
@@ -142,20 +148,22 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ── Per-node dice comparison bar
 st.markdown("""
 <div class="panel">
-    <div class="panel-title">📊 Per-Site Dice Score Comparison</div>
+    <div class="panel-title">📊 Per-Site Cohort Size</div>
 """, unsafe_allow_html=True)
 
-sites = ['Hospital A','Hospital B','Hospital C','Hospital D','Held-out']
-dices = [91.2, 92.8, 90.5, 89.9, 92.4]
-colors = ['#38BDF8','#818CF8','#38BDF8','#818CF8','#34D399']
+# Real cohort sizes. Per-site Dice does not exist until training has run, so the
+# bars show subject counts — a real quantity — rather than invented scores.
+sites = ['Hospital A', 'Hospital B', 'Held-out']
+counts = [_counts['Hospital A'], _counts['Hospital B'], _counts['Held-out']]
+colors = ['#38BDF8', '#818CF8', '#34D399']
 
-fig2 = go.Figure(go.Bar(x=sites, y=dices, marker_color=colors,
-                         text=[f'{d}%' for d in dices], textposition='outside',
+fig2 = go.Figure(go.Bar(x=sites, y=counts, marker_color=colors,
+                         text=[f'{c} subjects' for c in counts], textposition='outside',
                          textfont=dict(color='#94A3B8', size=12)))
 fig2.update_layout(
     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(5,10,30,0.6)',
     height=260, margin=dict(l=10,r=10,t=20,b=10),
-    yaxis=dict(gridcolor='rgba(255,255,255,0.05)', color='#64748B', range=[85,96]),
+    yaxis=dict(gridcolor='rgba(255,255,255,0.05)', color='#64748B', title='Subjects'),
     xaxis=dict(color='#64748B'), font=dict(color='#94A3B8')
 )
 st.plotly_chart(fig2, use_container_width=True)
