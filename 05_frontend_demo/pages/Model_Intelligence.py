@@ -131,9 +131,10 @@ with col2:
 # ── Training curves
 st.markdown("""
 <div class="panel">
-    <div class="panel-title">📈 Training & Validation Loss Curves</div>
+    <div class="panel-title">📈 Training & Validation Loss Curves <span style="color:#FBBF24;font-size:0.72rem;font-weight:600;">(ILLUSTRATIVE PLACEHOLDER · NOT MEASURED)</span></div>
 """, unsafe_allow_html=True)
 
+# Synthetic shape only - no training has been run. The ROC section below is real.
 epochs = list(range(1, 101))
 train_loss = [1.0 * (0.97**e) + 0.05 + 0.01*(e%5/5) for e in epochs]
 val_loss   = [1.05 * (0.968**e) + 0.07 + 0.015*(e%7/7) for e in epochs]
@@ -152,4 +153,91 @@ fig.update_layout(
     font=dict(color='#94A3B8')
 )
 st.plotly_chart(fig, use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════
+#  ROC / AUC  —  real voxel-level curves
+# ══════════════════════════════════════════════════════════
+# Genuinely computed: per-voxel softmax probability for each region vs that
+# region's ground-truth mask. Nothing here is drawn by hand. With an untrained
+# checkpoint the curves sit near the diagonal (AUC ~ 0.5), which is the correct
+# result for random weights.
+st.markdown("""
+<div class="panel">
+    <div class="panel-title">📉 ROC Curves & AUC — per evaluation region <span style="color:#34D399;font-size:0.72rem;font-weight:600;">(REAL · COMPUTED FROM THIS SUBJECT)</span></div>
+""", unsafe_allow_html=True)
+
+if not be.cache_available():
+    st.error(f"Cache directory not found: `{be.CACHE_DIR}`")
+else:
+    @st.cache_data(show_spinner="Running inference and computing ROC…")
+    def _roc(subject_id: str):
+        return be.roc_data(be.load_volume(subject_id))
+
+    _subs = be.list_subjects()
+    _c1, _c2 = st.columns([1, 2])
+    _coh = _c1.selectbox("Cohort", list(_subs.keys()), index=2, key="roc_cohort")
+    _sid = _c2.selectbox("Subject", _subs[_coh], key="roc_subject")
+
+    _r = _roc(_sid)
+    _colors = {"ET": "#EF4444", "NC": "#3B82F6", "WT": "#34D399"}
+
+    _fig = go.Figure()
+    _fig.add_trace(go.Scatter(
+        x=[0, 1], y=[0, 1], name="Chance (AUC 0.500)",
+        line=dict(color="#475569", width=1.5, dash="dash"), hoverinfo="skip",
+    ))
+    _undefined = []
+    for _region, _colour in _colors.items():
+        _d = _r[_region]
+        if _d["auc"] is None:
+            _undefined.append(_region)
+            continue
+        _fig.add_trace(go.Scatter(
+            x=_d["fpr"], y=_d["tpr"], name=f"{_region} (AUC {_d['auc']:.3f})",
+            line=dict(color=_colour, width=2.5),
+        ))
+
+    _fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(5,10,30,0.6)",
+        height=420, margin=dict(l=10, r=10, t=10, b=10),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#94A3B8"),
+                    x=0.55, y=0.08, xanchor="left"),
+        xaxis=dict(title="False positive rate", range=[0, 1.0],
+                   gridcolor="rgba(255,255,255,0.05)", color="#64748B"),
+        yaxis=dict(title="True positive rate", range=[0, 1.02],
+                   gridcolor="rgba(255,255,255,0.05)", color="#64748B"),
+        font=dict(color="#94A3B8"),
+    )
+    st.plotly_chart(_fig, use_container_width=True)
+
+    _cols = st.columns(3)
+    for _col, _region in zip(_cols, ("ET", "NC", "WT")):
+        _d = _r[_region]
+        if _d["auc"] is None:
+            _col.metric(f"AUC {_region}", "n/a")
+            _col.caption("Region absent from ground truth — AUC undefined.")
+        else:
+            _col.metric(f"AUC {_region}", f"{_d['auc']:.3f}")
+            _col.caption(f"{_d['n_pos']:,} positive / {_d['n_neg']:,} negative voxels")
+
+    if _undefined:
+        st.info(
+            f"No ROC for {', '.join(_undefined)} on this subject: the region is absent from "
+            "the ground truth, so there is no positive class. Common for ET in DMG/DIPG cases.",
+            icon="ℹ️",
+        )
+
+    _st = _r["_status"]
+    if not _st.trained:
+        st.warning(
+            "These curves are REAL — computed from actual per-voxel softmax probabilities "
+            "against actual ground truth — but the model is UNTRAINED, so they sit near the "
+            "chance diagonal. That is the correct output for randomly initialized weights, "
+            "not a plotting bug. The same code produces meaningful curves the moment a "
+            "trained checkpoint exists.",
+            icon="⚠️",
+        )
+    else:
+        st.caption(f"Computed with trained checkpoint `{_st.checkpoint.name}`.")
+
 st.markdown('</div>', unsafe_allow_html=True)

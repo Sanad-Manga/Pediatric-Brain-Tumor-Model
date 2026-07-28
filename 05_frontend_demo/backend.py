@@ -306,6 +306,73 @@ def run_inference(volume: Volume) -> dict:
     }
 
 
+# --------------------------------------------------------------- ROC / AUC
+#: probability composition per evaluation region — the softmax classes that make
+#: up each BraTS region, so the "score" for that region is their summed probability
+REGION_CLASSES = {"ET": (1,), "NC": (1, 2, 3), "WT": (1, 2, 3, 4)}
+
+
+@torch.no_grad()
+def roc_data(volume: Volume, max_points: int = 400) -> dict:
+    """Real voxel-level ROC + AUC per region for one subject.
+
+    The score for a region is the summed softmax probability of its constituent
+    classes; the target is that region's ground-truth mask. Both are real — this
+    is a genuine ROC, not an illustration.
+
+    With an untrained checkpoint the curve sits on the diagonal and AUC lands near
+    0.5. That is the correct result for random weights, not a bug.
+
+    A region absent from the ground truth has no positive class, so ROC/AUC are
+    undefined for it; those regions come back with ``auc=None``.
+    """
+    from sklearn.metrics import auc as _auc
+    from sklearn.metrics import roc_curve
+
+    model = load_model()
+    x = torch.from_numpy(volume.stack()).unsqueeze(0)
+    seg_logits, _ = model(x)
+    probs = torch.softmax(seg_logits, dim=1)[0].numpy()  # (5, D, H, W)
+
+    truth = volume.seg.reshape(-1)
+    out: dict[str, dict] = {}
+
+    for region, classes in REGION_CLASSES.items():
+        score = probs[list(classes)].sum(axis=0).reshape(-1).astype(np.float64)
+        target = np.isin(truth, classes).astype(np.uint8)
+
+        n_pos = int(target.sum())
+        if n_pos == 0 or n_pos == target.size:
+            out[region] = {"fpr": None, "tpr": None, "auc": None,
+                           "n_pos": n_pos, "n_neg": int(target.size - n_pos)}
+            continue
+
+        fpr, tpr, _ = roc_curve(target, score)
+        region_auc = float(_auc(fpr, tpr))
+
+        # Thin the curve for plotting; ROC from ~885k voxels has far more points
+        # than a chart needs. Endpoints are always kept so the curve spans 0..1.
+        if len(fpr) > max_points:
+            idx = np.unique(
+                np.concatenate([
+                    np.linspace(0, len(fpr) - 1, max_points).astype(int),
+                    [0, len(fpr) - 1],
+                ])
+            )
+            fpr, tpr = fpr[idx], tpr[idx]
+
+        out[region] = {
+            "fpr": fpr.tolist(),
+            "tpr": tpr.tolist(),
+            "auc": region_auc,
+            "n_pos": n_pos,
+            "n_neg": int(target.size - n_pos),
+        }
+
+    out["_status"] = model_status()
+    return out
+
+
 # --------------------------------------------------------- ablation results
 ABLATION_CSV = _REPO_ROOT / "03_augmentation_eval" / "results" / "ablation_results.csv"
 
