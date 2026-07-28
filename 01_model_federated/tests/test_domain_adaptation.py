@@ -32,6 +32,29 @@ def test_coral_backpropagates_to_both_domains():
     assert b.grad is not None and torch.isfinite(b.grad).all()
 
 
+@pytest.mark.parametrize(
+    ("source", "target", "message"),
+    [
+        (torch.randn(2, 3, 4), torch.randn(2, 3), "shape"),
+        (torch.randn(2, 3), torch.randn(2, 4), "dimensions"),
+    ],
+)
+def test_coral_rejects_invalid_shapes(source, target, message):
+    with pytest.raises(ValueError, match=message):
+        coral_loss(source, target)
+
+
+def test_coral_uses_float32_for_half_precision_inputs():
+    source = torch.randn(4, 5, dtype=torch.float16, requires_grad=True)
+    target = torch.randn(4, 5, dtype=torch.float16, requires_grad=True)
+    loss = coral_loss(source, target)
+    assert loss.dtype == torch.float32
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert torch.isfinite(source.grad).all()
+    assert torch.isfinite(target.grad).all()
+
+
 def test_single_subject_is_rejected():
     with pytest.raises(ValueError, match="at least two"):
         coral_loss(torch.randn(1, 4), torch.randn(2, 4))
@@ -46,6 +69,24 @@ def test_queue_preserves_only_current_gradient():
     combined.sum().backward()
     assert old.grad is None
     assert current.grad is not None
+
+
+def test_queue_rejects_capacity_below_two():
+    with pytest.raises(ValueError, match="at least two"):
+        FeatureQueue(1)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"coral_weight": -0.1},
+        {"coral_queue_size": 1},
+        {"coral_steps_per_round": 1},
+    ],
+)
+def test_invalid_coral_config_is_rejected(kwargs):
+    with pytest.raises(ValueError):
+        TrainConfig(**kwargs)
 
 
 def test_federated_flag_runs_coral_phase(monkeypatch, tmp_path, small_manifest):
@@ -66,7 +107,12 @@ def test_federated_flag_runs_coral_phase(monkeypatch, tmp_path, small_manifest):
         "train_coral_alignment",
         lambda model, config, source, target: calls.append((source, target)) or 0.25,
     )
-    monkeypatch.setattr(federated, "save_checkpoint", lambda *args, **kwargs: None)
+    saved = []
+    monkeypatch.setattr(
+        federated,
+        "save_checkpoint",
+        lambda *args, **kwargs: saved.append(kwargs["extra"]),
+    )
 
     manifests = [small_manifest("A", 2), small_manifest("B", 3)]
     config = TrainConfig(
@@ -76,6 +122,44 @@ def test_federated_flag_runs_coral_phase(monkeypatch, tmp_path, small_manifest):
     )
     federated.train_federated(config, manifests, num_rounds=1, local_epochs=1)
     assert calls == [(manifests[0], manifests[1])]
+    assert saved == [{"round": 0, "coral_loss": 0.25}]
+
+
+def test_disabled_flag_skips_coral_and_checkpoints_none(
+    monkeypatch, tmp_path, small_manifest
+):
+    class TinyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.tensor([1.0]))
+
+    calls, saved = [], []
+    monkeypatch.setattr(federated, "build_model", TinyModel)
+    monkeypatch.setattr(
+        federated,
+        "train_single_client",
+        lambda config, manifest_path, num_epochs, model, **kwargs: (model, [0.5]),
+    )
+    monkeypatch.setattr(
+        federated,
+        "train_coral_alignment",
+        lambda *args, **kwargs: calls.append(True) or 0.25,
+    )
+    monkeypatch.setattr(
+        federated,
+        "save_checkpoint",
+        lambda *args, **kwargs: saved.append(kwargs["extra"]),
+    )
+
+    manifests = [small_manifest("A-off", 2), small_manifest("B-off", 3)]
+    config = TrainConfig(
+        use_federation=True,
+        use_domain_adaptation=False,
+        checkpoint_dir=str(tmp_path),
+    )
+    federated.train_federated(config, manifests, num_rounds=1, local_epochs=1)
+    assert calls == []
+    assert saved == [{"round": 0, "coral_loss": None}]
 
 
 def test_alignment_phase_runs_end_to_end_with_unit_batches(monkeypatch):
