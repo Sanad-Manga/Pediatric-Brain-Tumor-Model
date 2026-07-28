@@ -126,13 +126,23 @@ def _znorm(channel: np.ndarray) -> np.ndarray:
 
 @dataclass
 class Volume:
-    """One subject's real volumes plus its ground-truth mask."""
+    """One subject's volumes, plus its ground-truth mask when one exists.
+
+    ``seg`` is ``None`` for scans uploaded through the UI — an incoming clinical
+    scan has no expert annotation, so anything derived from ground truth (Dice,
+    ROC, subregion truth stats) is unavailable by definition rather than
+    approximated.
+    """
 
     subject_id: str
     cohort: str
     images: dict[str, np.ndarray]  # modality -> (96,96,96) normalized float32
     raw: dict[str, np.ndarray]     # modality -> (96,96,96) raw float32, for display
-    seg: np.ndarray                # (96,96,96) uint8, labels 0-4
+    seg: np.ndarray | None         # (96,96,96) uint8 labels 0-4, or None if unlabelled
+
+    @property
+    def has_ground_truth(self) -> bool:
+        return self.seg is not None
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -286,6 +296,101 @@ def load_model():
     return model.eval()
 
 
+# ------------------------------------------------------------ uploaded scans
+UPLOAD_SUFFIXES = (".nii", ".nii.gz", ".npz")
+
+
+def resample_to_cube(arr: np.ndarray, size: tuple[int, int, int] = (96, 96, 96)) -> np.ndarray:
+    """Resample an arbitrary 3D volume onto the 96-cube grid the model expects.
+
+    Order-1 (trilinear) interpolation, matching how the shared cache was built.
+    """
+    from scipy.ndimage import zoom
+
+    arr = np.asarray(arr, dtype=np.float32)
+    if arr.ndim != 3:
+        raise ValueError(f"expected a 3D volume, got shape {arr.shape}")
+    if arr.shape == tuple(size):
+        return arr
+    factors = [t / s for t, s in zip(size, arr.shape)]
+    return zoom(arr, factors, order=1).astype(np.float32)
+
+
+def read_nifti(file_obj, filename: str) -> np.ndarray:
+    """Read an uploaded .nii / .nii.gz into a numpy array."""
+    import tempfile
+
+    import nibabel as nib
+
+    suffix = ".nii.gz" if filename.lower().endswith(".nii.gz") else ".nii"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(file_obj.getbuffer() if hasattr(file_obj, "getbuffer") else file_obj.read())
+        tmp_path = tmp.name
+    try:
+        img = nib.load(tmp_path)
+        return np.asarray(img.dataobj, dtype=np.float32)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def volume_from_uploads(files: dict[str, object], label: str = "uploaded scan") -> Volume:
+    """Build a :class:`Volume` from uploaded per-modality files.
+
+    ``files`` maps modality name -> uploaded file object. Every one of the four
+    modalities the model was designed around must be present; running with
+    missing channels would silently feed zeros and produce a confidently wrong
+    answer, so it is refused instead.
+    """
+    missing = [m for m in MODALITIES if m not in files or files[m] is None]
+    if missing:
+        raise ValueError(
+            f"missing modality file(s): {', '.join(missing)}. "
+            f"All four of {', '.join(MODALITIES)} are required."
+        )
+
+    raw: dict[str, np.ndarray] = {}
+    for m in MODALITIES:
+        f = files[m]
+        name = getattr(f, "name", "")
+        if name.lower().endswith(".npz"):
+            with np.load(f) as npz:
+                key = m if m in npz.files else npz.files[0]
+                arr = np.asarray(npz[key], dtype=np.float32)
+        else:
+            arr = read_nifti(f, name)
+        raw[m] = resample_to_cube(arr)
+
+    images = {m: _znorm(a) for m, a in raw.items()}
+    return Volume(label, "uploaded", images, raw, None)
+
+
+def volume_from_npz_bundle(file_obj, label: str = "uploaded scan") -> Volume:
+    """Build a :class:`Volume` from a single cache-format .npz holding all modalities."""
+    with np.load(file_obj) as npz:
+        available = set(npz.files)
+        missing = [m for m in MODALITIES if m not in available]
+        if missing:
+            raise ValueError(
+                f".npz is missing key(s): {', '.join(missing)}. "
+                f"Expected {', '.join(MODALITIES)} (plus optional 'seg')."
+            )
+        raw = {m: resample_to_cube(np.asarray(npz[m], dtype=np.float32)) for m in MODALITIES}
+        seg = None
+        if "seg" in available:
+            seg_arr = np.asarray(npz["seg"])
+            if seg_arr.shape != (96, 96, 96):
+                from scipy.ndimage import zoom
+                factors = [96 / s for s in seg_arr.shape]
+                seg_arr = zoom(seg_arr, factors, order=0)
+            seg = seg_arr.astype(np.uint8)
+
+    images = {m: _znorm(a) for m, a in raw.items()}
+    return Volume(label, "uploaded", images, raw, seg)
+
+
 @torch.no_grad()
 def run_inference(volume: Volume) -> dict:
     """Real forward pass over a real volume.
@@ -301,7 +406,8 @@ def run_inference(volume: Volume) -> dict:
     return {
         "pred_seg": pred,
         "features": features[0].numpy(),
-        "dice": region_dice(pred, volume.seg),
+        # No ground truth for an uploaded scan, so Dice is genuinely unavailable.
+        "dice": region_dice(pred, volume.seg) if volume.has_ground_truth else None,
         "status": model_status(),
     }
 
@@ -328,6 +434,12 @@ def roc_data(volume: Volume, max_points: int = 400) -> dict:
     """
     from sklearn.metrics import auc as _auc
     from sklearn.metrics import roc_curve
+
+    if not volume.has_ground_truth:
+        raise ValueError(
+            f"{volume.subject_id!r} has no ground-truth mask, so ROC/AUC cannot be computed. "
+            "ROC requires a labelled target."
+        )
 
     model = load_model()
     x = torch.from_numpy(volume.stack()).unsqueeze(0)
