@@ -117,6 +117,10 @@ def train_coral_alignment(
             )
 
         if loss is not None:
+            if not torch.isfinite(loss):
+                raise FloatingPointError(
+                    f"Non-finite CORAL loss encountered: {float(loss.detach())}"
+                )
             if use_amp:
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
