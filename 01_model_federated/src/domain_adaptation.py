@@ -81,6 +81,8 @@ def train_coral_alignment(
         batch_size=1,
         shuffle=True,
     )
+    if len(source) < 2 or len(target) < 2:
+        raise ValueError("CORAL alignment requires at least 2 subjects in both source and target manifests")
     steps = config.coral_steps_per_round or max(len(source), len(target))
     source_iter, target_iter = iter(source), iter(target)
     source_queue = FeatureQueue(config.coral_queue_size)
