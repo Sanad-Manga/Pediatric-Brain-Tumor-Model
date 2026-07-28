@@ -3,6 +3,7 @@ import torch
 
 from src.config import TrainConfig
 from src.domain_adaptation import FeatureQueue, coral_loss, covariance
+from src.model import build_model
 import src.federated as federated
 import src.domain_adaptation as da
 
@@ -108,3 +109,17 @@ def test_alignment_phase_runs_end_to_end_with_unit_batches(monkeypatch):
     )
     assert loss >= 0.0
     assert torch.isfinite(torch.tensor(loss))
+
+
+def test_bottleneck_embeddings_do_not_collapse_across_inputs():
+    model = build_model().eval()
+    inputs = torch.stack(
+        [
+            torch.zeros(4, 32, 32, 32),
+            torch.randn(4, 32, 32, 32),
+        ]
+    )
+    with torch.inference_mode():
+        _, features = model(inputs)
+    distance = torch.linalg.vector_norm(features[0] - features[1])
+    assert distance > 1e-5
