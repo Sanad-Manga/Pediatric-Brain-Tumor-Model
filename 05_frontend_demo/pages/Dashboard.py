@@ -274,7 +274,7 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-wrap">
-    <div class="hero-corner-badge">BUILD 2024.11 · RESEARCH MODE</div>
+    <div class="hero-corner-badge">BUILD 2026.7 · RESEARCH MODE</div>
     <div class="hero-label">
         <span class="hero-live-dot"></span>
         AI Command Center · Live
@@ -613,6 +613,6 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────
 st.markdown("""
 <div class="dash-footer">
-    NEUROFED AI &nbsp;·&nbsp; PEDIATRIC BRAIN TUMOR INTELLIGENCE &nbsp;·&nbsp; RESEARCH DEMONSTRATION &nbsp;·&nbsp; 2024
+    NEUROFED AI &nbsp;·&nbsp; PEDIATRIC BRAIN TUMOR INTELLIGENCE &nbsp;·&nbsp; RESEARCH DEMONSTRATION &nbsp;·&nbsp; 2026
 </div>
 """, unsafe_allow_html=True)
