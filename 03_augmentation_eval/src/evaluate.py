@@ -1,0 +1,265 @@
+"""Ablation runner: checkpoint -> held-out inference -> one row in the results CSV.
+
+Writes exactly the schema fixed in CONTRACTS.md::
+
+    experiment_name, use_augmentation, use_federation, use_domain_adaptation,
+    dice_ET, dice_NC, dice_WT, mean_dice
+
+**Dice is scored per patient, never per slice.** Every slice of a subject is
+predicted, un-padded back to its native shape, stacked into a volume, and one
+ET/NC/WT Dice is computed for that subject; the means across subjects are what
+land in the CSV. Averaging Dice per slice is not comparable to any BraTS number
+and badly overstates results, because ~70% of slices contain no tumour at all
+and an empty slice predicted empty scores 1.0.
+
+Plane policy (``eval.plane``) is explicit rather than implicit:
+
+* ``axial`` / ``coronal`` -- restack that plane's argmax class labels.
+* ``both`` -- average per-class softmax probabilities in the shared
+  (C, 240, 240, 155) voxel grid, then argmax once. This is legal because axial
+  and coronal slices index the same volume, so no reorientation is needed beyond
+  the inverse of the slicing axis.
+
+Evaluated on the held-out institution only, never on hospital A or B, and never
+with augmentation applied.
+"""
+
+from __future__ import annotations
+
+import csv
+import logging
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from .config import Config
+from .dataset import EvalSubjectDataset
+from .dummy import DummySegNet2D, load_checkpoint
+from .metrics import (
+    REGION_ORDER,
+    aggregate,
+    count_empty_ground_truth,
+    dice_regions,
+)
+from .slices import load_manifest, unpad
+
+LOGGER = logging.getLogger(__name__)
+
+CSV_COLUMNS = [
+    "experiment_name",
+    "use_augmentation",
+    "use_federation",
+    "use_domain_adaptation",
+    "dice_ET",
+    "dice_NC",
+    "dice_WT",
+    "mean_dice",
+]
+
+#: slices pushed through the network at once during inference
+INFER_CHUNK = 16
+
+
+# ----------------------------------------------------------------- CSV writing
+def append_result_row(row: dict, csv_path: str | Path) -> Path:
+    """Append exactly one row, creating the file (and its parent) if needed.
+
+    A pre-existing file with a different header is a hard error -- silently
+    appending misaligned columns would corrupt the ablation table.
+    """
+    path = Path(csv_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    missing = set(CSV_COLUMNS) - set(row)
+    if missing:
+        raise ValueError(f"result row is missing column(s) {sorted(missing)}")
+
+    write_header = True
+    if path.exists() and path.stat().st_size > 0:
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            existing = next(csv.reader(fh), None)
+        if existing != CSV_COLUMNS:
+            raise ValueError(
+                f"results CSV {path} has an unexpected header.\n"
+                f"  expected: {CSV_COLUMNS}\n"
+                f"  found:    {existing}"
+            )
+        write_header = False
+
+    with open(path, "a", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow({k: row[k] for k in CSV_COLUMNS})
+    return path
+
+
+# ------------------------------------------------------------------ restacking
+def restack_volume(arr: np.ndarray, plane: str, cfg: Config, channelled: bool = False) -> np.ndarray:
+    """Stack per-plane slices back into the volume frame.
+
+    ``(N, H, W)`` -> ``(X, Y, Z)``, or ``(C, N, H, W)`` -> ``(C, X, Y, Z)`` when
+    ``channelled``. This is the exact inverse of the slicing in ``slices.py``.
+    """
+    axis = cfg.plane_axis(plane)
+    return np.moveaxis(arr, 1, axis + 1) if channelled else np.moveaxis(arr, 0, axis)
+
+
+@torch.no_grad()
+def predict_slices(model, images: np.ndarray, device: str = "cpu") -> np.ndarray:
+    """Run the model over ``(N, C, H, W)``, returning ``(N, C_out, H, W)`` logits."""
+    outputs = []
+    for start in range(0, images.shape[0], INFER_CHUNK):
+        chunk = torch.as_tensor(images[start:start + INFER_CHUNK], dtype=torch.float32).to(device)
+        seg_logits, _features = model(chunk)
+        outputs.append(seg_logits.detach().cpu().numpy())
+    return np.concatenate(outputs, axis=0)
+
+
+def _softmax(logits: np.ndarray, axis: int = 1) -> np.ndarray:
+    shifted = logits - logits.max(axis=axis, keepdims=True)
+    exp = np.exp(shifted)
+    return exp / exp.sum(axis=axis, keepdims=True)
+
+
+@torch.no_grad()
+def evaluate_subject(model, items, cfg: Config, device: str = "cpu"):
+    """Score one subject from its restacked prediction volume.
+
+    ``items`` is the list of per-plane records for a single subject (one for
+    ``axial``/``coronal``, two for ``both``). Returns
+    ``(scores, true_volume, planes_used)``.
+    """
+    if not items:
+        raise ValueError("no cached planes for this subject")
+
+    plane_policy = cfg.eval_plane
+    prob_sum = None
+    pred_volume = None
+    true_volume = None
+    planes_used = []
+
+    for item in items:
+        plane = item["plane"]
+        planes_used.append(plane)
+
+        logits = predict_slices(model, item["images"], device=device)      # (N, C, H, W)
+        logits = unpad(logits, item["pad"])                                # native shape
+        labels = unpad(item["labels"], item["pad"])                        # (N, H, W)
+
+        true_volume = restack_volume(labels, plane, cfg)
+
+        if plane_policy == "both":
+            probs = _softmax(logits, axis=1).transpose(1, 0, 2, 3)         # (C, N, H, W)
+            volume_probs = restack_volume(probs, plane, cfg, channelled=True)
+            prob_sum = volume_probs if prob_sum is None else prob_sum + volume_probs
+        else:
+            pred_volume = restack_volume(np.argmax(logits, axis=1), plane, cfg)
+
+    if plane_policy == "both":
+        pred_volume = np.argmax(prob_sum, axis=0)
+
+    return dice_regions(pred_volume, true_volume), true_volume, planes_used
+
+
+def build_eval_dataset(cfg: Config, dummy_data: bool, dummy_n: int, cache_dir=None, tmp_dir=None):
+    """The held-out evaluation set, or a synthetic stand-in for ``--dummy-data``."""
+    if dummy_data:
+        from .dummy import make_dummy_cache
+
+        LOGGER.info("using a synthetic slice cache (the real cache is not read)")
+        tmp_dir = Path(tmp_dir)
+        subjects = [f"DUMMY-{i:04d}" for i in range(dummy_n)]
+        make_dummy_cache(tmp_dir, subjects, cfg, volume_shape=(24, 24, 16), seed=0)
+        return EvalSubjectDataset(subjects, cfg, cache_dir=tmp_dir), subjects
+
+    subjects = load_manifest(cfg.resolve("manifests"), "heldout")
+    LOGGER.info("evaluating on %d held-out subjects", len(subjects))
+    return EvalSubjectDataset(subjects, cfg, cache_dir=cache_dir), subjects
+
+
+def run(
+    cfg: Config,
+    experiment_name: str,
+    checkpoint: str | Path | None = None,
+    dummy_checkpoint: bool = False,
+    dummy_data: bool = False,
+    dummy_n: int = 4,
+    cache_dir: Path | None = None,
+    csv_path: str | Path | None = None,
+    device: str = "cpu",
+    tmp_dir: Path | None = None,
+) -> dict:
+    """Evaluate one configuration and append its row. Returns the written row."""
+    if checkpoint is None and not dummy_checkpoint:
+        raise ValueError("provide --checkpoint <path> or --dummy-checkpoint")
+
+    dataset, subjects = build_eval_dataset(cfg, dummy_data, dummy_n, cache_dir, tmp_dir)
+
+    model = DummySegNet2D(in_channels=len(cfg.modalities), num_classes=cfg.num_classes)
+    if dummy_checkpoint:
+        LOGGER.warning(
+            "running against a randomly-initialised DummySegNet2D - the Dice numbers "
+            "are pipeline validation only, not model performance"
+        )
+    else:
+        model = load_checkpoint(checkpoint, model)
+    model = model.to(device).eval()
+
+    # Group the (subject, plane) items back together per subject.
+    by_subject: dict[str, list] = {}
+    for i in range(len(dataset)):
+        try:
+            item = dataset[i]
+        except FileNotFoundError as exc:
+            LOGGER.warning("skipping: %s", exc)
+            continue
+        by_subject.setdefault(item["subject_id"], []).append(item)
+
+    per_subject, true_masks, single_plane = [], [], []
+    for subject_id in subjects:
+        items = by_subject.get(subject_id)
+        if not items:
+            continue
+        scores, true_volume, planes_used = evaluate_subject(model, items, cfg, device)
+        per_subject.append(scores)
+        true_masks.append(true_volume)
+        if cfg.eval_plane == "both" and len(planes_used) < len(cfg.planes):
+            single_plane.append(subject_id)
+
+    if not per_subject:
+        raise ValueError("evaluation set is empty; nothing to score")
+
+    scores = aggregate(per_subject)
+    empty_gt = count_empty_ground_truth(true_masks)
+
+    row = {
+        "experiment_name": experiment_name,
+        "use_augmentation": cfg.use_augmentation,
+        "use_federation": cfg.use_federation,
+        "use_domain_adaptation": cfg.use_domain_adaptation,
+        "dice_ET": round(scores["dice_ET"], 6),
+        "dice_NC": round(scores["dice_NC"], 6),
+        "dice_WT": round(scores["dice_WT"], 6),
+    }
+    # Keep the identity exact rather than a rounding artefact of the three parts.
+    row["mean_dice"] = round((row["dice_ET"] + row["dice_NC"] + row["dice_WT"]) / 3.0, 6)
+
+    out = Path(csv_path) if csv_path else cfg.resolve("results_csv")
+    append_result_row(row, out)
+
+    print(f"\n{experiment_name}: " +
+          "  ".join(f"{r}={row[f'dice_{r}']:.4f}" for r in REGION_ORDER))
+    print(f"  mean_dice={row['mean_dice']:.4f}")
+    print(f"  scored {len(per_subject)} subjects per patient from restacked volumes")
+    print(f"  eval plane policy: {cfg.eval_plane}")
+    print("  subjects with an empty ground-truth region: " +
+          ", ".join(f"{r}={empty_gt[r]}" for r in REGION_ORDER))
+    if single_plane:
+        print(f"  single-plane subjects (expected both): {len(single_plane)}")
+    print(f"  wrote: {out}")
+
+    row["_empty_ground_truth"] = empty_gt
+    row["_n_subjects"] = len(per_subject)
+    return row

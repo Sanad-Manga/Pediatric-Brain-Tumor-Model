@@ -1,149 +1,224 @@
-"""Datasets over an expansion plan (training) or a manifest (evaluation).
+"""Datasets and the CORAL-enabling batch sampler.
 
-Two hard rules are enforced structurally rather than by convention:
+``SliceDataset`` glues a plan entry to the cache: load the raw slice, normalise
+it with the *volume-level* statistics stored in the cache, pad it to the common
+network size, and augment it only when the entry says so and the config allows
+it.
 
-* Hospital provenance survives to the sample level — every training item carries
-  its `hospital`, `stratum` and `source_subject_id`, so A and B are separable at
-  any point downstream and are never pooled here.
-* The held-out institution is never augmented. :class:`EvalDataset` force-disables
-  augmentation regardless of the config flag, so an eval run cannot accidentally
-  inherit a training config.
+``EvalSubjectDataset`` yields whole subjects rather than loose slices, because
+Dice must be computed per patient from a restacked volume. It never augments,
+regardless of ``use_augmentation`` -- held-out data is never augmented.
+
+``PatientBalancedBatchSampler`` exists for section 02's CORAL: slices from one
+patient are near-duplicates and give a rank-deficient covariance, so a batch has
+to draw few slices from many patients. It also keeps every batch
+plane-homogeneous, since axial vs coronal differ more than hospital A vs B and
+mixing them makes CORAL align the plane difference instead of the scanner one.
 """
 
 from __future__ import annotations
 
-import logging
+from collections import OrderedDict
+from pathlib import Path
 
 import numpy as np
-import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
-from .augmentation import apply_transforms, build_transforms
+from .augment import apply_augmentation, build_transforms
 from .config import Config
-from .data import load_subject
-
-LOGGER = logging.getLogger(__name__)
+from .slices import load_subject_plane, normalize, pad_to
 
 
-class ExpansionDataset(Dataset):
-    """Training dataset for one hospital, driven by its expansion plan.
+class _CacheReader:
+    """Tiny LRU over decompressed cache files.
 
-    Augmented entries are materialized on the fly from
-    ``(source_subject_id, aug_seed)`` — the plan is the provenance record, the
-    volumes are never duplicated on disk.
-
-    * ``is_augmented=True``  -> transforms run under the entry's fixed seed
-      (reproducible: same seed, same output).
-    * ``is_augmented=False`` -> the original subject. It still receives live
-      random augmentation when ``use_augmentation`` is on, and is returned
-      untouched when it is off.
+    One subject/plane file holds every slice of that volume, so re-reading it
+    per slice would decompress ~70MB each time. Two entries is enough for the
+    access patterns here (sequential within a subject).
     """
 
-    def __init__(self, plan: dict, cfg: Config, cache_dir=None):
-        self.plan = plan
+    def __init__(self, cache_dir: Path, maxsize: int = 2):
+        self.cache_dir = Path(cache_dir)
+        self.maxsize = maxsize
+        self._store: OrderedDict[tuple[str, str], dict] = OrderedDict()
+
+    def get(self, subject_id: str, plane: str) -> dict:
+        key = (subject_id, plane)
+        if key in self._store:
+            self._store.move_to_end(key)
+            return self._store[key]
+        data = load_subject_plane(self.cache_dir, subject_id, plane)
+        self._store[key] = data
+        if len(self._store) > self.maxsize:
+            self._store.popitem(last=False)
+        return data
+
+
+def _load_slice(reader: _CacheReader, cfg: Config, subject_id, plane, slice_index):
+    """One normalised, padded slice: ``(image (C,H,W), label (1,H,W), pad, orig_shape)``."""
+    data = reader.get(subject_id, plane)
+    modalities = cfg.modalities
+    mean, std = data["norm_mean"], data["norm_std"]
+
+    channels = [
+        normalize(data[mod][slice_index], float(mean[m]), float(std[m]), cfg.min_std)
+        for m, mod in enumerate(modalities)
+    ]
+    image = np.stack(channels, axis=0)
+    label = data["seg"][slice_index][None].astype(np.int64)
+
+    orig_shape = tuple(image.shape[-2:])
+    image, pad = pad_to(image, cfg.common_size)
+    label, _ = pad_to(label, cfg.common_size)
+    return image.astype(np.float32), label, pad, orig_shape
+
+
+class SliceDataset(Dataset):
+    """Training slices described by a plan.
+
+    With ``use_augmentation: false`` no transform is constructed at all, so two
+    loads of the same entry are bitwise-identical.
+    """
+
+    def __init__(self, entries, cfg: Config, cache_dir: Path | None = None):
+        self.entries = list(entries)
         self.cfg = cfg
-        self.entries = plan["entries"]
-        self.hospital = plan["hospital"]
-        self.cache_dir = cache_dir if cache_dir is not None else cfg.resolve("cache")
-        self.transforms = build_transforms(cfg, cfg.spatial_size)
+        self.reader = _CacheReader(Path(cache_dir) if cache_dir else cfg.resolve("cache_2d"))
+        self.transforms = build_transforms(cfg)
 
     def __len__(self) -> int:
         return len(self.entries)
 
     def __getitem__(self, idx: int) -> dict:
         entry = self.entries[idx]
-        image, label = load_subject(
-            self.cache_dir,
-            entry["source_subject_id"],
-            modalities=self.cfg.modalities,
-            valid_labels=self.cfg.valid_labels,
+        image, label, pad, orig_shape = _load_slice(
+            self.reader, self.cfg,
+            entry["source_subject_id"], entry["plane"], entry["slice_index"],
         )
 
-        if self.transforms is None:
-            img_t = torch.as_tensor(image, dtype=torch.float32)
-            lab_t = torch.as_tensor(label, dtype=torch.int64)
-        else:
-            # Fixed seed for planned augmented copies; live randomness for originals.
-            seed = entry["aug_seed"] if entry["is_augmented"] else None
-            img_t, lab_t = apply_transforms(self.transforms, image, label, seed=seed)
-
-        return {
-            "image": img_t,
-            "label": lab_t,
-            "sample_id": entry["sample_id"],
-            "source_subject_id": entry["source_subject_id"],
-            "hospital": entry["hospital"],
-            "stratum": entry["stratum"],
-            "is_augmented": bool(entry["is_augmented"]),
-        }
-
-
-class EvalDataset(Dataset):
-    """Evaluation dataset over a manifest. Augmentation is always off.
-
-    Constructing this with an augmentation-enabled config logs a warning and
-    proceeds without augmentation — evaluation results must not depend on the
-    training flag.
-    """
-
-    def __init__(self, subject_ids: list[str], cfg: Config, cache_dir=None):
-        self.subject_ids = list(subject_ids)
-        self.cfg = cfg
-        self.cache_dir = cache_dir if cache_dir is not None else cfg.resolve("cache")
-        if cfg.use_augmentation:
-            LOGGER.warning(
-                "use_augmentation is true but this is an evaluation set; "
-                "augmentation is force-disabled for the held-out institution"
+        if self.transforms is not None and entry.get("is_augmented"):
+            image, label = apply_augmentation(
+                self.transforms, image, label, seed=entry.get("aug_seed")
             )
 
-    def __len__(self) -> int:
-        return len(self.subject_ids)
-
-    def __getitem__(self, idx: int) -> dict:
-        sid = self.subject_ids[idx]
-        image, label = load_subject(
-            self.cache_dir,
-            sid,
-            modalities=self.cfg.modalities,
-            valid_labels=self.cfg.valid_labels,
-        )
         return {
-            "image": torch.as_tensor(image, dtype=torch.float32),
-            "label": torch.as_tensor(label, dtype=torch.int64),
-            "sample_id": sid,
-            "source_subject_id": sid,
+            "image": image,
+            "label": label,
+            "pad": pad,
+            "orig_shape": orig_shape,
+            **{k: entry[k] for k in
+               ("hospital", "source_subject_id", "plane", "slice_index", "is_augmented")},
         }
 
 
-class DummyDataset(Dataset):
-    """Random tensors shaped like the real thing, for tests and ``--dummy-data``.
+class EvalSubjectDataset(Dataset):
+    """One item per (subject, plane): every slice of that plane, never augmented."""
 
-    Reads nothing from disk, so every module can be exercised before the real
-    model or cache is available.
+    def __init__(self, subject_ids, cfg: Config, cache_dir: Path | None = None, planes=None):
+        self.cfg = cfg
+        self.cache_dir = Path(cache_dir) if cache_dir else cfg.resolve("cache_2d")
+        self.reader = _CacheReader(self.cache_dir)
+        plane_choice = cfg.eval_plane
+        self.planes = list(planes) if planes else (
+            list(cfg.planes) if plane_choice == "both" else [plane_choice]
+        )
+        self.items = [(sid, plane) for sid in subject_ids for plane in self.planes]
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict:
+        subject_id, plane = self.items[idx]
+        data = self.reader.get(subject_id, plane)
+        n_slices = int(data["seg"].shape[0])
+
+        images, labels, pads = [], [], []
+        orig_shape = None
+        for i in range(n_slices):
+            image, label, pad, orig_shape = _load_slice(
+                self.reader, self.cfg, subject_id, plane, i
+            )
+            images.append(image)
+            labels.append(label[0])
+            pads.append(pad)
+
+        return {
+            "subject_id": subject_id,
+            "plane": plane,
+            "images": np.stack(images, axis=0),      # (N, C, H, W) padded
+            "labels": np.stack(labels, axis=0),      # (N, H, W) padded
+            "pad": pads[0],
+            "orig_shape": orig_shape,
+            "n_slices": n_slices,
+        }
+
+
+class PatientBalancedBatchSampler(Sampler):
+    """Batches of distinct patients, one plane per batch.
+
+    Both properties are requirements from section 02, not preferences: many
+    patients per batch keeps the feature covariance full-rank, and a single
+    plane per batch lets CORAL pair axial-A with axial-B.
     """
 
-    def __init__(self, n: int = 4, cfg: Config | None = None, spatial_size=(96, 96, 96),
-                 channels: int = 4, num_classes: int = 5, seed: int = 0):
-        if cfg is not None:
-            spatial_size = cfg.spatial_size
-            channels = len(cfg.modalities)
-            num_classes = cfg.num_classes
-        self.n = n
-        self.spatial_size = tuple(spatial_size)
-        self.channels = channels
-        self.num_classes = num_classes
-        self.seed = seed
+    def __init__(self, entries, batch_size: int, cfg: Config | None = None,
+                 max_per_patient: int | None = None, seed: int = 0, drop_last: bool = True):
+        self.entries = list(entries)
+        self.batch_size = int(batch_size)
+        self.drop_last = drop_last
+        self.seed = int(seed)
+        if max_per_patient is None:
+            sampler_cfg = cfg.sampler if cfg is not None else {}
+            max_per_patient = int(sampler_cfg.get("max_slices_per_patient_per_batch", 1))
+        self.max_per_patient = max(1, int(max_per_patient))
+        self.epoch = 0
+
+    def __iter__(self):
+        rng = np.random.default_rng([self.seed, self.epoch])
+        self.epoch += 1
+
+        # Group by plane first: a batch never spans planes.
+        by_plane: dict[str, dict[str, list[int]]] = {}
+        for i, entry in enumerate(self.entries):
+            by_plane.setdefault(entry["plane"], {}) \
+                    .setdefault(entry["source_subject_id"], []).append(i)
+
+        batches = []
+        for by_patient in by_plane.values():
+            pools = {pid: [int(v) for v in rng.permutation(idx)]
+                     for pid, idx in by_patient.items()}
+            while True:
+                available = [pid for pid, pool in pools.items() if pool]
+                if len(available) < self.batch_size:
+                    if self.drop_last or not available:
+                        break
+                    chosen = available
+                else:
+                    chosen = [available[k] for k in
+                              rng.permutation(len(available))[: self.batch_size]]
+
+                batch = []
+                for pid in chosen:
+                    for _ in range(self.max_per_patient):
+                        if len(batch) >= self.batch_size or not pools[pid]:
+                            break
+                        batch.append(pools[pid].pop())
+                if not batch:
+                    break
+                batches.append(batch)
+
+        for k in rng.permutation(len(batches)):
+            yield batches[k]
 
     def __len__(self) -> int:
-        return self.n
-
-    def __getitem__(self, idx: int) -> dict:
-        rng = np.random.default_rng(self.seed + idx)
-        image = rng.standard_normal((self.channels, *self.spatial_size), dtype=np.float32)
-        label = rng.integers(0, self.num_classes, size=(1, *self.spatial_size), dtype=np.int64)
-        return {
-            "image": torch.as_tensor(image),
-            "label": torch.as_tensor(label),
-            "sample_id": f"dummy-{idx:04d}",
-            "source_subject_id": f"dummy-{idx:04d}",
-        }
+        total = 0
+        patients: dict[str, set] = {}
+        counts: dict[str, int] = {}
+        for entry in self.entries:
+            plane = entry["plane"]
+            patients.setdefault(plane, set()).add(entry["source_subject_id"])
+            counts[plane] = counts.get(plane, 0) + 1
+        for plane, pids in patients.items():
+            if len(pids) >= self.batch_size:
+                total += counts[plane] // self.batch_size
+        return total
