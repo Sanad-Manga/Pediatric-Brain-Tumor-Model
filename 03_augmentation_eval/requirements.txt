@@ -1,0 +1,10 @@
+# 03_augmentation_eval — 2D slice augmentation + ablation
+# CPU-only is sufficient for everything reachable from run.py.
+
+torch>=2.0
+monai>=1.3
+numpy>=1.24
+pyyaml>=6.0
+nibabel>=5.0
+matplotlib>=3.7
+pytest>=7.4

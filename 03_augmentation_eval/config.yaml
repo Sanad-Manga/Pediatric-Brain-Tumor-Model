@@ -1,5 +1,11 @@
-# 03_augmentation_eval — configuration
-# All augmentation is gated by the single flag `use_augmentation` (see CONTRACTS.md).
+# 03_augmentation_eval — configuration (2D slices)
+#
+# The team switched this section from 3D volumes to 2D slices. Sagittal is
+# dropped; only axial and coronal are used, and all augmentation happens on the
+# slices. See SPEC.md.
+#
+# One flag gates the whole augmentation branch: `use_augmentation` masters both
+# the MONAI stack AND mixup, with `use_mixup` nested inside it.
 
 # ---------------------------------------------------------------- ablation flags
 use_augmentation: true      # master switch: MONAI stack AND mixup
@@ -9,42 +15,66 @@ use_domain_adaptation: false  # recorded in the results CSV; implemented in 02_d
 
 # ---------------------------------------------------------------- paths
 paths:
-  cache: "D:/Medical AI Workshop/cache_96cube"
+  # Raw BraTS-PEDs NIfTI root, read only by `run.py slices`. One folder per
+  # subject containing <subject>-t1c.nii.gz etc. Lives on Ahmed's laptop.
+  nifti_root: "D:/Medical AI Workshop/BraTS-PEDs/train"
+  # The 2D slice cache produced by `run.py slices` and read by everything else.
+  cache_2d: "D:/Medical AI Workshop/cache_2d"
   manifests: "../00_shared/manifests"
-  strata_csv: "strata.csv"
   plans_dir: "plans"
   results_csv: "results/ablation_results.csv"
 
 # ---------------------------------------------------------------- data
 data:
   modalities: ["t1c", "t1n", "t2f", "t2w"]
-  spatial_size: [96, 96, 96]
-  num_classes: 5            # background + labels 1..4
+  planes: ["axial", "coronal"]      # sagittal is deliberately absent
+  # Source volumes are 240 x 240 x 155 @ 1mm isotropic. Axial slices are
+  # 240x240, coronal are 240x155 -- padded (never resized) to one network size.
+  volume_shape: [240, 240, 155]
+  plane_axis:
+    sagittal: 0                     # dropped
+    coronal: 1                      # 240 slices of 240 x 155
+    axial: 2                        # 155 slices of 240 x 240
+  common_size: [256, 256]
+  resize_mode: "pad"                # pad only -- resizing would distort aspect
+  num_classes: 5                    # background + labels 1..4
   valid_labels: [0, 1, 2, 3, 4]
+  min_std: 1.0e-6                   # z-score denominator clamp
 
 # ---------------------------------------------------------------- expansion
+# The 3D rule was "150 subjects per hospital". In 2D it becomes a slice budget
+# that still balances at the patient level.
 expansion:
-  target_per_hospital: 150
+  target_per_hospital: 8000   # equal slice budget for A and B; never pooled
+  empty_slice_ratio: 0.30     # CEILING on the fraction of tumour-free slices
+  # FLOOR on the fraction of slices containing enhancing tumour (label 1).
+  # Balancing tumour-vs-empty alone is subregion-blind: ET is the smallest of
+  # the three scored regions and is absent entirely in many subjects, so
+  # without this it ends up under-represented. Honoured when supply allows;
+  # a hospital short of ET slices emits what it has and logs the shortfall.
+  et_slice_ratio: 0.25
+  cap_multiplier: 2.0         # per-patient cap = ceil(mult * target / n_patients)
   seed: 1337
 
-# ---------------------------------------------------------------- tumor-type proxy
-# NOTE: no tumor-type ground truth exists in the manifests or the cache. These
-# thresholds define an IMAGING PROXY derived from the segmentation mask geometry.
-# It is NOT histology. Override with `--tumor-type-csv` when real labels exist.
-strata:
-  lr_axis: 0                # array axis running left-right (midline-ness)
-  is_axis: 2                # array axis running inferior-superior (brainstem is low)
-  midline_offset_max: 0.15  # |centroid_lr - center| / center, below this = midline
-  inferior_frac_min: 0.60   # fraction of tumor voxels below the axial midpoint
-  et_frac_max: 0.10         # enhancing fraction; DMG/DIPG often enhances little
-  dmg_label: "dmg_like"
-  other_label: "astrocytoma_like"
+# ---------------------------------------------------------------- sampler
+# Section 02's CORAL needs many patients per batch (slices from one patient are
+# near-duplicates and give a rank-deficient covariance) and plane-matched
+# batches (axial vs coronal differ more than hospital A vs B).
+sampler:
+  max_slices_per_patient_per_batch: 1
+  plane_homogeneous_batches: true
+
+# ---------------------------------------------------------------- evaluation
+eval:
+  # axial | coronal | both. `both` averages softmax probabilities in the shared
+  # (C, 240, 240, 155) voxel grid before a single argmax.
+  plane: "axial"
 
 # ---------------------------------------------------------------- MONAI augmentation
 augmentation:
-  flip_prob: 0.5            # applied per spatial axis
-  affine_prob: 0.3
-  rotate_range_deg: 10.0    # +/- degrees about each axis
+  flip_prob: 0.5              # applied per spatial axis
+  rotate_prob: 0.3
+  rotate_range_deg: 10.0      # +/- degrees in-plane
   zoom_prob: 0.3
   zoom_min: 0.9
   zoom_max: 1.1
@@ -57,4 +87,4 @@ augmentation:
 
 # ---------------------------------------------------------------- mixup
 mixup:
-  alpha: 0.4                # Beta(alpha, alpha); must be > 0
+  alpha: 0.4                  # Beta(alpha, alpha); must be > 0
