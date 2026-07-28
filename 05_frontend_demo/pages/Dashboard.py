@@ -6,14 +6,26 @@ import torch
 import backend as be
 
 
-@st.cache_data(show_spinner="Reading cohort from manifests…")
-def _cohort_facts():
-    """Real counts from the manifests, plus real tumor stats for a few subjects."""
+@st.cache_data(show_spinner=False)
+def _cohort_counts():
+    """Real per-cohort counts. Reads only the manifest JSON, so this is instant.
+
+    Deliberately does NOT open any .npz. Streamlit flushes no output at all -
+    not even the sidebar - until the script yields, so any slow work at module
+    top level makes the whole landing page (nav included) appear blank on a cold
+    start. Volume reads belong behind an explicit user action, not here.
+    """
     subs = be.list_subjects()
     counts = {k: len(v) for k, v in subs.items()}
+    return counts, sum(counts.values())
+
+
+@st.cache_data(show_spinner="Measuring tumor burden from ground-truth masks…")
+def _sample_cases(per_cohort: int = 2):
+    """Real tumor stats for a small sample. Slow (opens .npz), so it is on demand."""
     rows = []
-    for cohort, ids in subs.items():
-        for sid in ids[:2]:  # a small real sample, not an invented case list
+    for cohort, ids in be.list_subjects().items():
+        for sid in ids[:per_cohort]:
             seg = be.load_volume(sid).seg
             regions = {r["region"]: r for r in be.region_stats(seg)}
             rows.append({
@@ -23,10 +35,10 @@ def _cohort_facts():
                 "Volume (est.)": f"{regions['WT']['volume_ml']:.1f} mL",
                 "ET present": "yes" if regions["ET"]["present"] else "no",
             })
-    return counts, sum(counts.values()), pd.DataFrame(rows)
+    return pd.DataFrame(rows)
 
 
-_COUNTS, _TOTAL, _CASES = _cohort_facts()
+_COUNTS, _TOTAL = _cohort_counts()
 _STATUS = be.model_status()
 _DEVICE = "CUDA" if torch.cuda.is_available() else "CPU"
 
@@ -597,11 +609,22 @@ with col_r:
         'Real Subjects · Ground-Truth Tumor Burden</div>',
         unsafe_allow_html=True,
     )
-    st.dataframe(_CASES, use_container_width=True, hide_index=True)
-    st.caption(
-        "Real subject IDs and real tumor volumes measured from the ground-truth masks. "
-        "No confidence column: confidence would require a trained model."
-    )
+    # Loaded on demand: opening .npz files is slow, and doing it at page load
+    # blanks the whole app (sidebar included) until it finishes.
+    if st.button("Measure tumor burden", help="Reads real ground-truth masks from the cache"):
+        st.session_state["_show_cases"] = True
+
+    if st.session_state.get("_show_cases"):
+        st.dataframe(_sample_cases(), use_container_width=True, hide_index=True)
+        st.caption(
+            "Real subject IDs and real tumor volumes measured from the ground-truth masks. "
+            "No confidence column: confidence would require a trained model."
+        )
+    else:
+        st.caption(
+            f"{_TOTAL} subjects available across {len(_COUNTS)} cohorts. "
+            "Click above to measure real tumor volumes from the ground-truth masks."
+        )
 
 # ──────────────────────────────────────────────────────────
 #  RESEARCH HIGHLIGHTS
