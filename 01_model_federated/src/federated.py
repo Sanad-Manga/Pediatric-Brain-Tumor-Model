@@ -11,6 +11,7 @@ from .config import TrainConfig
 from .data import load_manifest
 from .model import FederatedUNet3D, build_model
 from .train_single import train_single_client
+from .domain_adaptation import train_coral_alignment
 
 
 def weighted_average_state_dicts(
@@ -93,13 +94,23 @@ def train_federated(
         new_global_state = weighted_average_state_dicts(client_state_dicts, client_subject_counts)
         global_model.load_state_dict(new_global_state)
 
+        coral_round_loss = None
+        if config.use_domain_adaptation:
+            if len(client_manifest_paths) != 2:
+                raise ValueError(
+                    "Domain adaptation currently supports exactly 2 client manifests (Hospital A and Hospital B)."
+                )
+            coral_round_loss = train_coral_alignment(
+                global_model, config, client_manifest_paths[0], client_manifest_paths[1]
+            )
+
         save_checkpoint(
             config.checkpoint_dir,
             config.run_id,
             round_idx,
             global_model.state_dict(),
             dummy_optimizer.state_dict(),
-            extra={"round": round_idx},
+            extra={"round": round_idx, "coral_loss": coral_round_loss},
         )
 
     return global_model, round_losses

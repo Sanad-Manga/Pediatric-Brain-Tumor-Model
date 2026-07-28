@@ -10,6 +10,7 @@ import copy
 import torch
 import torch.nn as nn
 from monai.networks.nets import UNet
+from monai.networks.blocks import ResidualUnit
 
 IN_CHANNELS = 4  # t1c, t1n, t2f, t2w
 NUM_CLASSES = 5  # background + ET, NET, CC, ED
@@ -57,23 +58,29 @@ class FederatedUNet3D(nn.Module):
 
     @staticmethod
     def _find_bottleneck_module(root: nn.Module) -> nn.Module:
-        deepest = None
+        """Locate the deepest residual block, not a normalization leaf.
+
+        Global-pooling an ``InstanceNorm3d`` output collapses every channel to
+        approximately zero by construction.  The previous generic "deepest
+        child" search selected exactly that layer, making embeddings almost
+        identical across subjects and reducing CORAL loss to zero.  Hooking the
+        complete deepest residual unit yields the actual bottleneck activation.
+        """
+        deepest: ResidualUnit | None = None
         max_depth = -1
 
         def _walk(mod: nn.Module, depth: int) -> None:
             nonlocal deepest, max_depth
-            children = list(mod.children())
-            if not children:
-                return
-            if depth > max_depth:
+            if isinstance(mod, ResidualUnit) and depth > max_depth:
                 max_depth = depth
-                deepest = children[0]
+                deepest = mod
+            children = list(mod.children())
             for child in children:
                 _walk(child, depth + 1)
 
         _walk(root, 0)
         if deepest is None:
-            raise RuntimeError("Could not locate a bottleneck module in the UNet backbone")
+            raise RuntimeError("Could not locate a bottleneck ResidualUnit in the UNet backbone")
         return deepest
 
     def __deepcopy__(self, memo: dict) -> "FederatedUNet3D":

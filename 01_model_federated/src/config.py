@@ -21,6 +21,9 @@ class TrainConfig:
     lr: float = 1e-3
     local_epochs: int = 1
     num_rounds: int = 2
+    coral_weight: float = 1.0
+    coral_queue_size: int = 8
+    coral_steps_per_round: int | None = None
 
     # Checkpointing
     run_id: str = "default_run"
@@ -38,3 +41,9 @@ class TrainConfig:
             raise ValueError(f"data_mode must be 'dummy' or 'real', got {self.data_mode!r}")
         if self.data_mode == "real" and not self.cache_path:
             raise ValueError("data_mode='real' requires an explicit cache_path")
+        if self.coral_weight < 0:
+            raise ValueError("coral_weight must be non-negative")
+        if self.coral_queue_size < 2:
+            raise ValueError("coral_queue_size must be at least 2")
+        if self.coral_steps_per_round is not None and self.coral_steps_per_round < 2:
+            raise ValueError("coral_steps_per_round must be at least 2 when set")
