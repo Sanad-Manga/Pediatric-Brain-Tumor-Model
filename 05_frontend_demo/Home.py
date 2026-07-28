@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime
 
 # ==========================================================
@@ -75,9 +76,53 @@ st.markdown("""
         color: var(--text-primary);
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+
+    /* DO NOT hide the header. The only control that reopens a collapsed sidebar
+       lives inside it, so `header {visibility: hidden}` made one accidental click
+       on the ‹‹ collapse arrow remove the navigation permanently — the sidebar
+       ends up translated off-screen with no way back.
+       Hide just the toolbar contents (Deploy button, hamburger menu) instead and
+       leave the header itself alive. */
+    header, [data-testid="stHeader"] {
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    [data-testid="stToolbar"],
+    [data-testid="stMainMenuButton"],
+    #MainMenu {
+        display: none !important;
+    }
+
+    /* ---------- SIDEBAR IS STATIC ----------
+       The sidebar is pinned open and cannot be collapsed. Streamlit persists its
+       collapsed state in localStorage (`stSidebarCollapsed-`), so one accidental
+       click on the ‹‹ arrow hid the navigation on every future visit, across
+       reloads and server restarts. Rather than depend on that toggle behaving,
+       the collapse control is removed and the open state is forced here, which
+       also neutralises any collapsed flag already saved in a user's browser. */
+    [data-testid="stSidebar"] {
+        transform: none !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        width: 300px !important;
+        min-width: 300px !important;
+        max-width: 300px !important;
+        margin-left: 0 !important;
+        left: 0 !important;
+    }
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        transform: none !important;
+    }
+    /* the ‹‹ collapse arrow, and the ›› control that would reopen it */
+    [data-testid="stSidebar"] [data-testid="stBaseButton-headerNoPadding"],
+    [data-testid="stSidebarCollapseButton"],
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
+    }
+    /* stop the drag-to-resize handle from shrinking it to nothing */
+    [data-testid="stSidebarResizeHandle"] { display: none !important; }
 
     * { scrollbar-width: thin; scrollbar-color: rgba(56,189,248,0.35) transparent; }
     ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -359,4 +404,45 @@ with st.sidebar:
 # ==========================================================
 # 5. RUN NAVIGATION
 # ==========================================================
+# ==========================================================
+# 5. PIN THE SIDEBAR OPEN
+# ==========================================================
+# Streamlit stores the sidebar's collapsed state in localStorage
+# (`stSidebarCollapsed-`), so one click on the collapse arrow hid the navigation
+# on every later visit - across reloads, new tabs and server restarts - and the
+# reopen control sat inside the header this app hides. CSS alone does not win:
+# Streamlit re-applies an inline width and a -300px transform after every rerun.
+# This clears the stored flag and re-expands the sidebar if anything collapses
+# it. Runs in a zero-height iframe, reaching the host page via window.parent.
+components.html(
+    """
+    <script>
+    (function () {
+        const doc = window.parent.document;
+        function pin() {
+            try { window.parent.localStorage.setItem('stSidebarCollapsed-', 'false'); } catch (e) {}
+            const sb = doc.querySelector('[data-testid="stSidebar"]');
+            if (!sb) return;
+            if (sb.getAttribute('aria-expanded') === 'false') {
+                const btn = doc.querySelector(
+                    '[data-testid="stExpandSidebarButton"] button,' +
+                    '[data-testid="stSidebarCollapsedControl"] button'
+                );
+                if (btn) { btn.click(); return; }
+            }
+            sb.style.setProperty('transform', 'none', 'important');
+            sb.style.setProperty('width', '300px', 'important');
+            sb.style.setProperty('min-width', '300px', 'important');
+            sb.style.setProperty('visibility', 'visible', 'important');
+        }
+        pin();
+        setInterval(pin, 400);
+        new MutationObserver(pin).observe(doc.body, { childList: true, subtree: true });
+    })();
+    </script>
+    """,
+    height=0,
+)
+
+
 pg.run()
