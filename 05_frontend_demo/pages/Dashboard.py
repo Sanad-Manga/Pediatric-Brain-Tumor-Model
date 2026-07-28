@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import time
-st.set_option('client.showErrorDetails', True)
+
 # ──────────────────────────────────────────────────────────
 #  PAGE-LEVEL CSS (inherits global theme from app.py)
 # ──────────────────────────────────────────────────────────
@@ -334,75 +334,67 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────
 #  PLATFORM MODULES
 # ──────────────────────────────────────────────────────────
+# Section heading
 st.markdown("""
 <div class="section-heading">
     <div class="section-heading-icon">🧩</div>
     <div>
         <div class="section-heading-text">Platform Modules</div>
-        <div class="section-heading-sub">
-            Six interconnected tools — from raw MRI to clinical report
-        </div>
+        <div class="section-heading-sub">Six interconnected tools — from raw MRI to clinical report</div>
     </div>
 </div>
-
-<div class="mod-grid">
-
-<div class="mod-card cyan">
-<div class="mod-card-top">
-<div class="mod-card-icon">🖥️</div>
-<div>
-<div class="mod-card-name">MRI Analysis Studio</div>
-<div class="mod-card-nav">Clinical & Analysis →</div>
-</div>
-</div>
-<div class="mod-card-desc">
-Upload multi-modal MRI volumes. Inspect slices in an interactive 3D viewer with segmentation overlays rendered per-class.
-</div>
-<div class="mod-card-pills">
-<span class="pill cyan">3D Viewer</span>
-<span class="pill cyan">Multi-modal</span>
-<span class="pill cyan">Overlay</span>
-</div>
-</div>
-
-<div class="mod-card violet">
-<div class="mod-card-top">
-<div class="mod-card-icon">📋</div>
-<div>
-<div class="mod-card-name">Segmentation Report</div>
-<div class="mod-card-nav">Clinical & Analysis →</div>
-</div>
-</div>
-<div class="mod-card-desc">
-AI-generated patient summary with tumor statistics, region-level interpretation, and one-click PDF export for clinical records.
-</div>
-<div class="mod-card-pills">
-<span class="pill violet">Tumor Stats</span>
-<span class="pill violet">PDF Export</span>
-<span class="pill violet">Summary</span>
-</div>
-</div>
-
-<div class="mod-card green">
-<div class="mod-card-top">
-<div class="mod-card-icon">🩺</div>
-<div>
-<div class="mod-card-name">Clinical Explainability</div>
-<div class="mod-card-nav">Clinical & Analysis →</div>
-</div>
-</div>
-<div class="mod-card-desc">
-Grad-CAM and attention maps reveal exactly which voxels drove each prediction.
-</div>
-<div class="mod-card-pills">
-<span class="pill green">Grad-CAM</span>
-<span class="pill green">Attention</span>
-<span class="pill green">XAI</span>
-</div>
-</div>
-
-</div>
 """, unsafe_allow_html=True)
+
+def mod_card(icon, name, nav, desc, pills, color):
+    pill_html = "".join(f'<span class="pill {color}">{p}</span>' for p in pills)
+    return f"""
+    <div class="mod-card {color}" style="height:100%;">
+        <div class="mod-card-top">
+            <div class="mod-card-icon">{icon}</div>
+            <div>
+                <div class="mod-card-name">{name}</div>
+                <div class="mod-card-nav">{nav}</div>
+            </div>
+        </div>
+        <div class="mod-card-desc">{desc}</div>
+        <div class="mod-card-pills">{pill_html}</div>
+    </div>"""
+
+_row1 = st.columns(3, gap="small")
+_modules_r1 = [
+    ("🖥️", "MRI Analysis Studio",    "Clinical & Analysis →",
+     "Upload multi-modal MRI volumes. Inspect slices in an interactive 3D viewer with segmentation overlays rendered per-class.",
+     ["3D Viewer","Multi-modal","Overlay"], "cyan"),
+    ("📋", "Segmentation Report",     "Clinical & Analysis →",
+     "AI-generated patient summary with tumor statistics, region-level interpretation, and one-click PDF export for clinical records.",
+     ["Tumor Stats","PDF Export","Summary"], "violet"),
+    ("🩺", "Clinical Explainability", "Clinical & Analysis →",
+     "Grad-CAM and attention maps reveal exactly which voxels drove each prediction — grounding AI decisions in anatomy radiologists recognize.",
+     ["Grad-CAM","Attention","XAI"], "green"),
+]
+for col, (icon, name, nav, desc, pills, color) in zip(_row1, _modules_r1):
+    with col:
+        st.markdown(mod_card(icon, name, nav, desc, pills, color), unsafe_allow_html=True)
+
+st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
+
+_row2 = st.columns(3, gap="small")
+_modules_r2 = [
+    ("🌐", "Federated Observatory",  "Federated & AI Core →",
+     "Real-time dashboard of hospital client nodes: training rounds, gradient sync, communication overhead, and convergence tracking.",
+     ["FedAvg","5 Clients","Live Sync"], "cyan"),
+    ("🧬", "Domain Adaptation Lab",  "Federated & AI Core →",
+     "CORAL feature alignment and adversarial adaptation close the gap between scanner sites, scanner protocols, and patient demographics.",
+     ["CORAL","Alignment","Cross-site"], "violet"),
+    ("🧠", "Model Intelligence",     "Federated & AI Core →",
+     "Full architecture inspection, layer-wise metrics, validation curves, and ablation comparisons across federated training runs.",
+     ["Architecture","Metrics","Ablation"], "green"),
+]
+for col, (icon, name, nav, desc, pills, color) in zip(_row2, _modules_r2):
+    with col:
+        st.markdown(mod_card(icon, name, nav, desc, pills, color), unsafe_allow_html=True)
+
+st.markdown("<div style='margin-bottom:20px'></div>", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────
 #  INFERENCE PIPELINE

@@ -1,51 +1,149 @@
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
 
 st.set_page_config(page_title="Domain Adaptation Lab | NeuroFed AI", page_icon="🧬", layout="wide")
 
 st.markdown("""
-    <div style="padding: 10px 0;">
-        <h2 style="font-size: 2rem; color: #FFFFFF;">CORAL Domain Adaptation Lab</h2>
-        <p style="color: #94A3B8; font-size: 0.9rem;">Visualizing feature distribution alignment and scanner bias reduction across institutions.</p>
-    </div>
+<style>
+.page-hero {
+    background: radial-gradient(circle at 20% 50%, rgba(129,140,248,0.10), transparent 50%),
+                linear-gradient(135deg,#0B1628,#0F172A);
+    border:1px solid rgba(129,140,248,0.25); border-radius:20px; padding:40px 44px; margin-bottom:28px;
+}
+.page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em;
+    background:linear-gradient(135deg,#fff 40%,#818CF8 80%,#38BDF8);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-bottom:8px; }
+.page-sub { color:#94A3B8; font-size:0.92rem; }
+.panel { background:rgba(15,23,42,0.55); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:28px; margin-bottom:20px; }
+.panel-title { font-size:1rem; font-weight:700; color:#F3F4F6; margin-bottom:18px; }
+.gap-row { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px; }
+.gap-card { background:rgba(10,15,35,0.65); border-radius:14px; padding:20px; }
+.gap-card-head { font-size:0.85rem; font-weight:700; margin-bottom:6px; }
+.gap-card-head.bad  { color:#F87171; }
+.gap-card-head.good { color:#34D399; }
+.gap-score { font-size:0.8rem; font-family:'JetBrains Mono',monospace; margin-top:6px; }
+.coral-steps { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+.coral-step {
+    background:rgba(10,15,35,0.65); border:1px solid rgba(129,140,248,0.15);
+    border-radius:12px; padding:18px; text-align:center;
+    transition: border-color .2s ease, transform .2s ease;
+}
+.coral-step:hover { border-color:rgba(129,140,248,0.4); transform:translateY(-2px); }
+.coral-step-num { font-size:0.7rem; font-family:'JetBrains Mono',monospace;
+    color:#818CF8; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px; }
+.coral-step-icon { font-size:1.5rem; margin-bottom:8px; }
+.coral-step-name { font-size:0.82rem; font-weight:700; color:#F3F4F6; margin-bottom:4px; }
+.coral-step-desc { font-size:0.72rem; color:#64748B; line-height:1.4; }
+</style>
+
+<div class="page-hero">
+    <div class="page-title">CORAL Domain Adaptation Lab</div>
+    <div class="page-sub">Visualizing feature distribution alignment and scanner bias reduction across hospital institutions.</div>
+</div>
 """, unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
+# ── Gap score cards + scatter plots
+st.markdown('<div class="gap-row">', unsafe_allow_html=True)
 
+col1, col2 = st.columns(2, gap="medium")
+
+np.random.seed(42)
 with col1:
     st.markdown("""
-        <div style="background: rgba(16, 24, 46, 0.7); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 14px; padding: 24px;">
-            <h3 style="color: #FFFFFF; font-size: 1.1rem; margin-bottom: 12px;">❌ Before Adaptation (High Scanner Bias)</h3>
+    <div class="panel" style="margin-bottom:0;">
+        <div class="panel-title">❌ Before Adaptation — High Scanner Bias</div>
     """, unsafe_allow_html=True)
-    
-    # Mock scatter before adaptation
     df_before = pd.DataFrame({
-        'PC1': np.concatenate([np.random.normal(-2, 0.5, 50), np.random.normal(2, 0.5, 50)]),
-        'PC2': np.concatenate([np.random.normal(-1, 0.5, 50), np.random.normal(1, 0.5, 50)]),
-        'Hospital': ['Hospital A']*50 + ['Hospital B']*50
+        'PC1': np.concatenate([np.random.normal(-2, 0.5, 60), np.random.normal(2, 0.5, 60)]),
+        'PC2': np.concatenate([np.random.normal(-1, 0.5, 60), np.random.normal(1, 0.5, 60)]),
+        'Site': ['Hospital A']*60 + ['Hospital B']*60
     })
-    fig1 = px.scatter(df_before, x='PC1', y='PC2', color='Hospital', template='plotly_dark')
-    fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=300, margin=dict(l=10, r=10, t=10, b=10))
+    fig1 = px.scatter(df_before, x='PC1', y='PC2', color='Site',
+                      color_discrete_map={'Hospital A':'#38BDF8','Hospital B':'#818CF8'},
+                      template='plotly_dark', labels={'PC1':'PCA Component 1','PC2':'PCA Component 2'})
+    fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(5,10,30,0.6)',
+                       height=300, margin=dict(l=10,r=10,t=10,b=10),
+                       legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color='#94A3B8')))
+    fig1.update_xaxes(gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.1)')
+    fig1.update_yaxes(gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.1)')
     st.plotly_chart(fig1, use_container_width=True)
-    st.markdown("<p style='color: #EF4444; font-size: 0.8rem;'>Domain Gap Score: <b>0.684</b> (Significant Divergence)</p>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.8rem;font-family:monospace;color:#F87171;margin-top:4px;">Domain Gap Score: <b>0.684</b> — Significant Divergence</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
     st.markdown("""
-        <div style="background: rgba(16, 24, 46, 0.7); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 14px; padding: 24px;">
-            <h3 style="color: #FFFFFF; font-size: 1.1rem; margin-bottom: 12px;">✅ After CORAL Alignment (Harmonized Space)</h3>
+    <div class="panel" style="margin-bottom:0;">
+        <div class="panel-title">✅ After CORAL Alignment — Harmonized Space</div>
     """, unsafe_allow_html=True)
-    
-    # Mock scatter after adaptation
     df_after = pd.DataFrame({
-        'PC1': np.concatenate([np.random.normal(0, 0.6, 50), np.random.normal(0.1, 0.6, 50)]),
-        'PC2': np.concatenate([np.random.normal(0, 0.6, 50), np.random.normal(-0.1, 0.6, 50)]),
-        'Hospital': ['Hospital A']*50 + ['Hospital B']*50
+        'PC1': np.concatenate([np.random.normal(0, 0.55, 60), np.random.normal(0.08, 0.55, 60)]),
+        'PC2': np.concatenate([np.random.normal(0, 0.55, 60), np.random.normal(-0.08, 0.55, 60)]),
+        'Site': ['Hospital A']*60 + ['Hospital B']*60
     })
-    fig2 = px.scatter(df_after, x='PC1', y='PC2', color='Hospital', template='plotly_dark')
-    fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=300, margin=dict(l=10, r=10, t=10, b=10))
+    fig2 = px.scatter(df_after, x='PC1', y='PC2', color='Site',
+                      color_discrete_map={'Hospital A':'#38BDF8','Hospital B':'#818CF8'},
+                      template='plotly_dark', labels={'PC1':'PCA Component 1','PC2':'PCA Component 2'})
+    fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(5,10,30,0.6)',
+                       height=300, margin=dict(l=10,r=10,t=10,b=10),
+                       legend=dict(bgcolor='rgba(0,0,0,0)', font=dict(color='#94A3B8')))
+    fig2.update_xaxes(gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.1)')
+    fig2.update_yaxes(gridcolor='rgba(255,255,255,0.05)', zerolinecolor='rgba(255,255,255,0.1)')
     st.plotly_chart(fig2, use_container_width=True)
-    st.markdown("<p style='color: #10B981; font-size: 0.8rem;'>Domain Gap Score: <b>0.042</b> (Harmonized Covariance)</p>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.8rem;font-family:monospace;color:#34D399;margin-top:4px;">Domain Gap Score: <b>0.042</b> — Harmonized Covariance</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ── Domain gap over adaptation steps (bar chart)
+st.markdown("""
+<div class="panel">
+    <div class="panel-title">📉 Domain Gap Reduction Progress</div>
+""", unsafe_allow_html=True)
+
+steps = ['Baseline', 'Normalization', 'PCA Align', 'CORAL Step 1', 'CORAL Step 2', 'Final']
+gaps  = [0.684, 0.520, 0.380, 0.210, 0.085, 0.042]
+colors = ['#F87171','#FB923C','#FBBF24','#818CF8','#38BDF8','#34D399']
+
+fig3 = go.Figure(go.Bar(x=steps, y=gaps, marker_color=colors,
+                         text=[f'{g:.3f}' for g in gaps], textposition='outside',
+                         textfont=dict(color='#94A3B8', size=11)))
+fig3.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(5,10,30,0.6)',
+                   height=280, margin=dict(l=10,r=10,t=20,b=10),
+                   yaxis=dict(gridcolor='rgba(255,255,255,0.05)', color='#64748B'),
+                   xaxis=dict(color='#64748B'), font=dict(color='#94A3B8'))
+st.plotly_chart(fig3, use_container_width=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ── CORAL method steps
+st.markdown("""
+<div class="panel">
+    <div class="panel-title">🧬 CORAL Alignment Pipeline</div>
+    <div class="coral-steps">
+        <div class="coral-step">
+            <div class="coral-step-num">Step 01</div>
+            <div class="coral-step-icon">📥</div>
+            <div class="coral-step-name">Feature Extraction</div>
+            <div class="coral-step-desc">Extract deep feature maps from source & target domain encoders.</div>
+        </div>
+        <div class="coral-step">
+            <div class="coral-step-num">Step 02</div>
+            <div class="coral-step-icon">📐</div>
+            <div class="coral-step-name">Covariance Estimation</div>
+            <div class="coral-step-desc">Compute second-order statistics matrices C_S and C_T per domain.</div>
+        </div>
+        <div class="coral-step">
+            <div class="coral-step-num">Step 03</div>
+            <div class="coral-step-icon">🔄</div>
+            <div class="coral-step-name">Whitening Transform</div>
+            <div class="coral-step-desc">Decorrelate source features via C_S^{-1/2} whitening operation.</div>
+        </div>
+        <div class="coral-step">
+            <div class="coral-step-num">Step 04</div>
+            <div class="coral-step-icon">✅</div>
+            <div class="coral-step-name">Coloring Projection</div>
+            <div class="coral-step-desc">Re-color with C_T^{1/2} to match target distribution — gap closed.</div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
