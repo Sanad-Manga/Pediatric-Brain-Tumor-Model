@@ -24,6 +24,7 @@ honest answer: the setting overfit the validation patients. Report it anyway.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -49,16 +50,30 @@ SWEEP = [
 
 
 def read_val_subjects(checkpoint: Path) -> list[str]:
-    """The validation patients this checkpoint was selected against."""
+    """The validation patients this checkpoint was selected against.
+
+    Newer checkpoints carry the split themselves. Older ones do not, so fall
+    back to the ``history.json`` written alongside them -- which is where the
+    split has always been recorded.
+    """
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    subjects = payload.get("val_subjects") if isinstance(payload, dict) else None
-    if not subjects:
-        raise SystemExit(
-            f"{checkpoint} has no 'val_subjects' key. It predates that field, so "
-            "the validation split cannot be recovered and tuning on it would be "
-            "guesswork. Tune against a checkpoint from a newer run."
-        )
-    return list(subjects)
+    if isinstance(payload, dict) and payload.get("val_subjects"):
+        return list(payload["val_subjects"])
+
+    history = checkpoint.parent / "history.json"
+    if history.exists():
+        with open(history, "r", encoding="utf-8") as fh:
+            subjects = json.load(fh).get("val_subjects")
+        if subjects:
+            print(f"(validation split recovered from {history.name})")
+            return list(subjects)
+
+    raise SystemExit(
+        f"cannot recover the validation split for {checkpoint}: no 'val_subjects' "
+        f"in the checkpoint and no usable {history}. Tuning without it would mean "
+        "guessing at the split, so stop here rather than tuning on the wrong "
+        "patients."
+    )
 
 
 def main() -> int:

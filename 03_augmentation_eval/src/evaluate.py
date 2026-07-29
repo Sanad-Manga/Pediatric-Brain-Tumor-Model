@@ -130,12 +130,20 @@ def restack_volume(arr: np.ndarray, plane: str, cfg: Config, channelled: bool = 
 
 @torch.no_grad()
 def predict_slices(model, images: np.ndarray, device: str = "cpu") -> np.ndarray:
-    """Run the model over ``(N, C, H, W)``, returning ``(N, C_out, H, W)`` logits."""
+    """Run the model over ``(N, C, H, W)``, returning ``(N, C_out, H, W)`` logits.
+
+    On CUDA this runs under fp16 autocast -- inference only, and the logits are
+    cast straight back to float32 so softmax and every downstream metric stay in
+    single precision. On CPU autocast is disabled, so nothing measured on a CPU
+    box moves by a single bit.
+    """
+    on_cuda = str(device).startswith("cuda")
     outputs = []
     for start in range(0, images.shape[0], INFER_CHUNK):
         chunk = torch.as_tensor(images[start:start + INFER_CHUNK], dtype=torch.float32).to(device)
-        seg_logits, _features = model(chunk)
-        outputs.append(seg_logits.detach().cpu().numpy())
+        with torch.amp.autocast("cuda", enabled=on_cuda):
+            seg_logits, _features = model(chunk)
+        outputs.append(seg_logits.detach().float().cpu().numpy())
     return np.concatenate(outputs, axis=0)
 
 

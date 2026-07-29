@@ -186,6 +186,8 @@ def cmd_train(args) -> int:
         cache_dir=Path(args.cache) if args.cache else None,
         device=args.device,
         resume=not args.no_resume,
+        amp=args.amp,
+        num_workers=args.num_workers,
     )
     ckpt = Path(summary["checkpoint_dir"])
     print(f"\nbest mean_dice: {summary['best_mean_dice']}")
@@ -362,6 +364,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="cap steps per epoch (short runs on CPU)")
     p_train.add_argument("--cache", default=None, help="override paths.cache_2d")
     p_train.add_argument("--device", default="cpu")
+    p_train.add_argument("--no-amp", dest="amp", action="store_false", default=None,
+                         help="disable fp16 autocast (on by default on CUDA)")
+    p_train.add_argument("--num-workers", type=int, default=0,
+                         help="DataLoader worker processes; 2-4 helps on Colab")
     p_train.add_argument("--no-resume", action="store_true",
                          help="ignore an existing checkpoint and start fresh")
     for flag in ("use-augmentation", "use-mixup"):
