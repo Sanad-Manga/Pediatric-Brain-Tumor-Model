@@ -51,7 +51,7 @@ data:
 # The 3D rule was "150 subjects per hospital". In 2D it becomes a slice budget
 # that still balances at the patient level.
 expansion:
-  target_per_hospital: 8000   # equal slice budget for A and B; never pooled
+  target_per_hospital: 15000   # equal slice budget for A and B; never pooled
   empty_slice_ratio: 0.30     # CEILING on the fraction of tumour-free slices
   # FLOOR on the fraction of slices containing enhancing tumour (label 1).
   # Balancing tumour-vs-empty alone is subregion-blind: ET is the smallest of
@@ -87,7 +87,36 @@ tumor_type:
 eval:
   # axial | coronal | both. `both` averages softmax probabilities in the shared
   # (C, 240, 240, 155) voxel grid before a single argmax.
-  plane: "axial"
+  plane: "both"
+
+# ---------------------------------------------------------------- model
+model:
+  # Channel width of the first level; every level is width * 2**i. 16 gave a
+  # 482,949-parameter network -- about 1/60th of a standard nnU-Net, and small
+  # enough that capacity, not data, was the binding constraint. 48 gives
+  # 4,333,445 parameters and still trains comfortably on a T4.
+  width: 48
+  depth: 3
+
+# ---------------------------------------------------------------- loss / schedule
+loss:
+  # Cross-entropy class weights, index 0..4 (background, ET, NETC, CC, ED).
+  # Enhancing tumour is the weakest region and the smallest by volume, so it is
+  # up-weighted. null = uniform, which is what every run before this used.
+  class_weights: [0.2, 3.0, 1.0, 1.0, 1.0]
+
+schedule:
+  # Validation Dice oscillated late in training at a fixed 1e-3 -- the step size
+  # was too large to settle. Cosine decay to `min_lr` over the run.
+  kind: "cosine"          # cosine | none
+  min_lr: 1.0e-5
+
+selection:
+  # `mean` reproduces the old behaviour and is what picked epoch 25 over epoch
+  # 16 -- a checkpoint 0.165 worse at ET. `min_region` selects on the WORST
+  # region instead, which cannot be gamed by one region carrying the average.
+  # Both checkpoints are always written; this only decides which is `best.pt`.
+  metric: "min_region"    # mean | min_region
 
 # ---------------------------------------------------------------- MONAI augmentation
 augmentation:

@@ -31,7 +31,7 @@ if str(_SECTION_03) not in sys.path:
 
 from src.config import load_config                      # noqa: E402
 from src.dataset import _load_slice                     # noqa: E402
-from src.model import TumorTypeHead, build_model        # noqa: E402
+from src.model import TumorTypeHead, build_model, infer_geometry  # noqa: E402
 from src.slices import list_slice_indices, list_subjects, unpad  # noqa: E402
 from src.tumor_type import TYPE_LABELS                  # noqa: E402
 
@@ -99,7 +99,12 @@ def load_model(checkpoint_path: str | Path = DEFAULT_CHECKPOINT,
     cfg = default_config(cache_dir)
 
     payload = torch.load(path, map_location=device, weights_only=False)
-    model = build_model(cfg, spatial_dims=meta["spatial_dims"])
+    # Build at the checkpoint's own geometry, not the config's -- config.model
+    # may have changed since this checkpoint was trained.
+    geom = {k: payload[k] for k in ("width", "depth") if k in payload}
+    if not geom:
+        geom = infer_geometry(payload["model_state_dict"])
+    model = build_model(cfg, spatial_dims=meta["spatial_dims"], **geom)
     model.load_state_dict(payload["model_state_dict"])
     model.to(device).eval()
 

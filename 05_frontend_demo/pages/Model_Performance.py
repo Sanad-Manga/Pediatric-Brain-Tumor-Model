@@ -180,6 +180,41 @@ with right:
         """, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
+# ─────────────────────────────── tumour-type auxiliary head
+history = loaders.load_training_history()
+if history and any("type_accuracy" in h for h in history):
+    st.markdown('<div class="panel"><div class="panel-title">🧬 Tumour-type classification head</div>',
+                unsafe_allow_html=True)
+    pts = [(h["epoch"], h["type_accuracy"]) for h in history if "type_accuracy" in h]
+    best_acc = max(a for _, a in pts)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[e for e, _ in pts], y=[a for _, a in pts],
+                             name="type accuracy", line=dict(color="#7E22CE", width=2)))
+    # 92 of 145 subjects are astrocytoma-like, so always guessing that class
+    # scores 0.634. The head is only doing real work above this line.
+    fig.add_trace(go.Scatter(x=[pts[0][0], pts[-1][0]], y=[0.634, 0.634],
+                             name="majority-class baseline (0.634)",
+                             line=dict(color="#94A3B8", width=1, dash="dash")))
+    layout = dict(PLOT_LAYOUT)
+    layout["yaxis"] = dict(PLOT_LAYOUT["yaxis"], title="accuracy", range=[0, 1])
+    layout["xaxis"] = dict(PLOT_LAYOUT["xaxis"], title="epoch")
+    layout["height"] = 300
+    fig.update_layout(**layout)
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown(f"""
+    <div class="caveat-box">
+        <b>This is not a histological diagnosis.</b> No tumour-type ground truth exists
+        anywhere in this dataset. The head is trained against a <i>geometric proxy</i>
+        computed from the segmentation mask alone — how close the tumour sits to the
+        midline, how far inferior it lies, and how little of it enhances — which
+        approximates DMG/DIPG versus astrocytoma. Best validation accuracy reached
+        <b>{best_acc:.3f}</b> against a majority-class baseline of <b>0.634</b>
+        (92 of 145 subjects are astrocytoma-like), so the head has learned a real
+        signal, but it is a signal about tumour <i>geometry</i>, not tissue.
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
 st.markdown(f"""
 <div class="panel">
     <div class="panel-title">🧾 Provenance</div>

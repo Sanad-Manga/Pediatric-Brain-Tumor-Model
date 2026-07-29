@@ -36,7 +36,7 @@ import torch
 from .config import Config
 from .dataset import EvalSubjectDataset
 from .dummy import DummySegNet2D, load_checkpoint
-from .model import build_model
+from .model import build_model, infer_geometry
 from .metrics import (
     REGION_ORDER,
     aggregate,
@@ -244,7 +244,13 @@ def run(
             model = DummySegNet2D(in_channels=len(cfg.modalities),
                                   num_classes=cfg.num_classes)
         else:
-            model = build_model(cfg, spatial_dims=int(meta.get("spatial_dims", 2)))
+            # Geometry comes from the checkpoint, not the config: config.model
+            # may have changed since it was trained, and rebuilding at the wrong
+            # width fails with a shape mismatch that looks like a corrupt file.
+            geom = {k: payload[k] for k in ("width", "depth") if k in payload}
+            if not geom:
+                geom = infer_geometry(payload["model_state_dict"])
+            model = build_model(cfg, spatial_dims=int(meta.get("spatial_dims", 2)), **geom)
         model = load_checkpoint(checkpoint, model)
     model = model.to(device).eval()
 

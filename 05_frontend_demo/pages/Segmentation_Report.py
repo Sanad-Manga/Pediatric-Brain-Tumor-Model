@@ -18,6 +18,8 @@ from components.theme import apply_custom_theme
 from utils import loaders
 from utils.inference import (
     DEFAULT_CHECKPOINT,
+    LABEL_NAMES,
+    checkpoint_metadata,
     dice_per_region,
     load_model,
     predict_slice,
@@ -154,18 +156,93 @@ with col_main:
                 unsafe_allow_html=True)
 
     t1c = result["image"][0]
-    fig = go.Figure()
-    fig.add_trace(go.Heatmap(z=np.flipud(t1c), colorscale="Gray", showscale=False))
-    overlay = np.where(pred > 0, pred, np.nan)
-    fig.add_trace(go.Heatmap(z=np.flipud(overlay), colorscale="Turbo", opacity=0.55,
-                             showscale=False, zmin=1, zmax=4))
-    fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                      margin=dict(l=6, r=6, t=6, b=6), height=420,
-                      yaxis=dict(scaleanchor="x", visible=False), xaxis=dict(visible=False))
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption("T1c with the model's predicted segmentation overlaid. "
-               "Ground-truth Dice for this slice is reported at right.")
+
+    def overlay_figure(mask, title):
+        """T1c in greyscale with a label mask painted on top.
+
+        Labels are drawn with a fixed discrete colour per class so the two
+        panels are directly comparable — a shared continuous colourscale would
+        remap colours when one panel happens to lack a label.
+        """
+        fig = go.Figure()
+        fig.add_trace(go.Heatmap(z=np.flipud(t1c), colorscale="Gray", showscale=False,
+                                 hoverinfo="skip"))
+        for label_id, (name, colour) in LABEL_NAMES.items():
+            layer = np.where(mask == label_id, 1.0, np.nan)
+            if not np.isfinite(layer).any():
+                continue
+            fig.add_trace(go.Heatmap(
+                z=np.flipud(layer), showscale=False, opacity=0.6,
+                colorscale=[[0, colour], [1, colour]], name=name,
+                hovertemplate=f"{name}<extra></extra>",
+            ))
+        fig.update_layout(
+            title=dict(text=title, font=dict(size=13, color="#0F172A"), x=0.5),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=4, r=4, t=34, b=4), height=340,
+            yaxis=dict(scaleanchor="x", visible=False), xaxis=dict(visible=False),
+        )
+        return fig
+
+    img_l, img_r = st.columns(2)
+    with img_l:
+        st.plotly_chart(overlay_figure(truth, "Ground truth"), use_container_width=True)
+    with img_r:
+        st.plotly_chart(overlay_figure(pred, "Model prediction"), use_container_width=True)
+
+    legend = "  ".join(
+        f'<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px;">'
+        f'<span style="width:10px;height:10px;border-radius:2px;background:{c};display:inline-block;"></span>'
+        f'<span style="font-size:0.75rem;color:#475569;">{n}</span></span>'
+        for n, c in LABEL_NAMES.values()
+    )
+    st.markdown(f'<div style="margin:-6px 0 4px 2px;">{legend}</div>', unsafe_allow_html=True)
+    st.caption("Both panels show the same T1c slice. Dice for this slice is reported at right.")
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── epoch-to-epoch comparison, where two checkpoints exist
+    other = DEFAULT_CHECKPOINT.parent / ("last.pt" if DEFAULT_CHECKPOINT.name == "best.pt" else "best.pt")
+    if other.exists():
+        st.markdown('<div class="panel"><div class="panel-title">⏱️ How the prediction changed between checkpoints</div>',
+                    unsafe_allow_html=True)
+        try:
+            other_meta = checkpoint_metadata(other)
+            o_model, o_head, o_cfg, _ = load_model(other, str(loaders.cache_dir()))
+            o_result = predict_slice(o_model, o_cfg, loaders.cache_dir(), subject_id,
+                                     plane, slice_index, type_head=o_head)
+            o_dice = dice_per_region(o_result["prediction"], truth)
+
+            c_a, c_b = st.columns(2)
+            with c_a:
+                st.plotly_chart(
+                    overlay_figure(o_result["prediction"],
+                                   f"Epoch {other_meta['epoch']} ({other.name})"),
+                    use_container_width=True)
+            with c_b:
+                st.plotly_chart(
+                    overlay_figure(pred, f"Epoch {meta['epoch']} ({DEFAULT_CHECKPOINT.name})"),
+                    use_container_width=True)
+
+            fmt = lambda v: "n/a" if v is None else f"{v:.3f}"
+            st.markdown(
+                f"""<table class="meta-table" style="width:100%;">
+                <tr><td class="meta-key"></td>
+                    <td class="meta-val"><b>epoch {other_meta['epoch']}</b></td>
+                    <td class="meta-val"><b>epoch {meta['epoch']}</b></td></tr>
+                {''.join(
+                    f'<tr><td class="meta-key">Dice {r}</td>'
+                    f'<td class="meta-val" style="font-family:monospace;">{fmt(o_dice[r])}</td>'
+                    f'<td class="meta-val" style="font-family:monospace;">{fmt(dice[r])}</td></tr>'
+                    for r in ("ET", "TC", "WT", "mean"))}
+                </table>""", unsafe_allow_html=True)
+            st.caption(
+                "Only these two model states survive: training overwrites `last.pt` and "
+                "`best.pt` each epoch, so intermediate epochs cannot be re-rendered. "
+                "A later epoch is not automatically better on any single slice."
+            )
+        except Exception as exc:
+            st.info(f"Comparison unavailable: {exc}")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     dice_cell = lambda v: "n/a" if v is None else f"{v:.3f}"
     st.markdown(f"""
