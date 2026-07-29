@@ -19,7 +19,7 @@ paths:
   # section consumes it. Layout: <cache_2d>/<subject>/<plane>/slice_NNN.npz
   # with keys `image` (4, H, W) float32 -- already z-scored per volume, channels
   # in the order t1c, t1n, t2f, t2w -- and `mask` (1, H, W) uint8, labels 0-4.
-  cache_2d: "/content/drive/MyDrive/Medical AI Workshop/pack_out"
+  cache_2d: "/content/drive/MyDrive/Medical AI Workshop/pack_out/pack_out"
   manifests: "../00_shared/manifests"
   plans_dir: "plans"
   results_csv: "results/ablation_results.csv"
