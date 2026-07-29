@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from .inference import DEFAULT_CHECKPOINT, available_subjects, checkpoint_metadata
-from .metrics import collect_scores
+from .metrics import collect_scores, thin_curve
 
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "roc_cache.json"
 
@@ -70,12 +70,14 @@ def main(argv=None) -> int:
         if v is None:
             payload["regions"][region] = None
             continue
-        # thin the curve for storage; the AUC is computed from the full curve
-        keep = np.unique(np.linspace(0, len(v["fpr"]) - 1, 300).astype(int))
+        # AUC comes from the full-resolution curve (computed in collect_scores);
+        # only the stored copy is thinned, by arc length so the elbow survives.
+        p_fpr, p_tpr, _ = thin_curve(v["fpr"], v["tpr"], None, 300)
         payload["regions"][region] = {
             "auc": v["auc"],
-            "fpr": [round(float(x), 6) for x in np.asarray(v["fpr"])[keep]],
-            "tpr": [round(float(x), 6) for x in np.asarray(v["tpr"])[keep]],
+            "n_curve_points_full": int(len(v["fpr"])),
+            "fpr": [round(float(x), 6) for x in p_fpr],
+            "tpr": [round(float(x), 6) for x in p_tpr],
             "n_pixels": v["n_pixels"],
             "n_positive": v["n_positive"],
             "prevalence": v["prevalence"],
