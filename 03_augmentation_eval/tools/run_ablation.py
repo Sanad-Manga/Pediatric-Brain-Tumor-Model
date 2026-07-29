@@ -83,6 +83,12 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1337,
                     help="shared by every condition; do not vary it per row")
     ap.add_argument("--num-workers", type=int, default=0)
+    ap.add_argument("--width", type=int, default=None,
+                    help="override model.width for every condition. The ablation "
+                         "asks whether augmentation helps, which a smaller and far "
+                         "cheaper network answers just as well -- width 16 is ~9x "
+                         "less compute than 48. Whatever is used must be stated "
+                         "alongside the table, since it is not the shipped width.")
     ap.add_argument("--out-csv", default=None)
     ap.add_argument("--config", default=None)
     ap.add_argument("--rerun", action="store_true",

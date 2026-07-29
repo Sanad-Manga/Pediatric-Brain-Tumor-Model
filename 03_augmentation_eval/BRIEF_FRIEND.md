@@ -106,6 +106,93 @@ Two framing rules that apply everywhere in the UI:
    truth in this dataset; it is trained against a geometric proxy computed from
    the mask. Any page implying diagnosis needs to say so.
 
+## Task 4 — the ablation (needs your GPU, your Colab account)
+
+This is section 03's actual deliverable and the table is currently empty. It runs
+on **your** Colab account — Ahmed's quota is used up and the main training run is
+on a third person's account, so your GPU is the only one free.
+
+It cannot be produced by running `run.py eval` several times. That command copies
+the config flags into the CSV while the Dice columns all come from the same
+weights, so you'd get a table that looks like an ablation and measures nothing.
+`tools/run_ablation.py` trains each condition separately.
+
+Three conditions, one flag changing at a time, shared seed:
+
+| condition | `use_augmentation` | `use_mixup` |
+|---|---|---|
+| `no_augmentation` | false | (forced off) |
+| `augmentation_no_mixup` | true | false |
+| `augmentation_and_mixup` | true | true |
+
+### What you need
+
+**1. The data.** The 9.8 GB `pack_out_15k.zip` — ask Ahmed for a Drive share
+link. Put it in your own Drive; don't try to read it out of anyone else's.
+
+**2. A Colab GPU runtime**, then:
+
+```python
+from google.colab import drive; drive.mount('/content/drive')
+```
+
+```bash
+!git clone -b claude/medical-ai-augmentation-eval-7f4098 https://github.com/Sanad-Manga/Pediatric-Brain-Tumor-Model.git /content/repo
+!pip -q install monai pyyaml scipy
+```
+
+```bash
+!mkdir -p /content/data && unzip -q /content/drive/MyDrive/pack_out_15k.zip -d /content/data && find /content/data/pack_out_15k -name "*.npz" | wc -l
+```
+
+That count must be ~55,523. Unzip to `/content/data` (local disk), never read the
+55k files over the Drive mount — it's slow enough to dominate the run.
+
+**3. Checkpoints on Drive**, or a disconnect loses everything:
+
+```bash
+!mkdir -p /content/drive/MyDrive/ablation_ckpt && ln -sfn /content/drive/MyDrive/ablation_ckpt /content/repo/03_augmentation_eval/checkpoints
+```
+
+**4. Run it:**
+
+```bash
+%cd /content/repo/03_augmentation_eval
+```
+
+```bash
+!python tools/run_ablation.py --device cuda --epochs 8 --num-workers 2 --cache /content/data/pack_out_15k
+```
+
+Safe to interrupt. Each condition resumes from its own checkpoint directory, and
+conditions already in the CSV are skipped, so re-running the same command after a
+disconnect picks up where it stopped. That will happen — plan for it.
+
+### Cost warning — read before launching
+
+At the config's current `model.width: 48` this is three runs of eight epochs over
+24k slices. That is roughly as much GPU time as Ahmed's entire main run, and it
+will not fit in a free account's quota.
+
+**Talk to Ahmed before starting.** The ablation asks whether augmentation helps,
+and a smaller network answers that just as well — width 16 is about 9× less
+compute. Either he adds a `--width` flag or you agree on a reduced `--epochs` /
+`--max-steps` budget. Whatever you use has to be stated next to the table,
+because it is not the width the shipped model uses.
+
+### Reporting it
+
+The absolute Dice values here will land well below the shipped model's
+0.599 / 0.521 / 0.827. They are short comparable runs, not the model's
+performance — **the difference between rows is the finding, the absolute numbers
+are not**. Quoting an ablation Dice as the model's score understates it badly.
+
+`use_federation` and `use_domain_adaptation` are false in every row. That is a
+result, not an omission — see "What NOT to do" below. Write one sentence saying
+so rather than leaving the columns looking untested.
+
+Send back `results/ablation_results.csv` plus the three `history.json` files.
+
 ## Rules
 
 - **Don't touch `src/train.py` or `config.yaml`.** Ahmed is editing both for AMP
