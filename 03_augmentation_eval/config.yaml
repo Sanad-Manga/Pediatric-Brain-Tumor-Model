@@ -51,7 +51,7 @@ data:
 # The 3D rule was "150 subjects per hospital". In 2D it becomes a slice budget
 # that still balances at the patient level.
 expansion:
-  target_per_hospital: 8000   # equal slice budget for A and B; never pooled
+  target_per_hospital: 15000   # equal slice budget for A and B; never pooled
   empty_slice_ratio: 0.30     # CEILING on the fraction of tumour-free slices
   # FLOOR on the fraction of slices containing enhancing tumour (label 1).
   # Balancing tumour-vs-empty alone is subregion-blind: ET is the smallest of
@@ -88,6 +88,15 @@ eval:
   # axial | coronal | both. `both` averages softmax probabilities in the shared
   # (C, 240, 240, 155) voxel grid before a single argmax.
   plane: "both"
+
+# ---------------------------------------------------------------- model
+model:
+  # Channel width of the first level; every level is width * 2**i. 16 gave a
+  # 482,949-parameter network -- about 1/60th of a standard nnU-Net, and small
+  # enough that capacity, not data, was the binding constraint. 48 gives
+  # 4,333,445 parameters and still trains comfortably on a T4.
+  width: 48
+  depth: 3
 
 # ---------------------------------------------------------------- loss / schedule
 loss:

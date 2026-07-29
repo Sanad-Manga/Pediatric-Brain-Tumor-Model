@@ -41,6 +41,7 @@ class Config:
     sampler: dict = field(default_factory=dict)
     eval: dict = field(default_factory=dict)
     tumor_type: dict = field(default_factory=dict)
+    model: dict = field(default_factory=dict)
     loss: dict = field(default_factory=dict)
     schedule: dict = field(default_factory=dict)
     selection: dict = field(default_factory=dict)
@@ -125,6 +126,14 @@ class Config:
         return float(self.tumor_type.get("loss_weight", 0.2))
 
     @property
+    def model_width(self) -> int:
+        return int(self.model.get("width", 16))
+
+    @property
+    def model_depth(self) -> int:
+        return int(self.model.get("depth", 3))
+
+    @property
     def class_weights(self):
         """Cross-entropy class weights, or None for uniform.
 
@@ -189,6 +198,7 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
         sampler=copy.deepcopy(dict(raw.get("sampler", {}))),
         eval=copy.deepcopy(dict(raw.get("eval", {}))),
         tumor_type=copy.deepcopy(dict(raw.get("tumor_type", {}))),
+        model=copy.deepcopy(dict(raw.get("model", {}))),
         loss=copy.deepcopy(dict(raw.get("loss", {}))),
         schedule=copy.deepcopy(dict(raw.get("schedule", {}))),
         selection=copy.deepcopy(dict(raw.get("selection", {}))),

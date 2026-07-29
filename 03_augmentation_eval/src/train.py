@@ -142,6 +142,10 @@ def save_checkpoint(path: Path, model, optimizer, epoch: int, best: float, cfg: 
         "epoch": epoch,
         "best_mean_dice": best,
         "spatial_dims": getattr(model, "spatial_dims", 2),
+        # Record the geometry: a checkpoint trained at one width cannot be
+        # rebuilt from a config that has since changed to another.
+        "width": cfg.model_width,
+        "depth": cfg.model_depth,
         "use_augmentation": cfg.use_augmentation,
         "use_mixup": cfg.use_mixup,
     }

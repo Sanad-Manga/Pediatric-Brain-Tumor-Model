@@ -107,6 +107,20 @@ class UNet(nn.Module):
         return self.head(x), features
 
 
+def infer_geometry(state_dict) -> dict:
+    """Recover ``width`` and ``depth`` from a saved ``model_state_dict``.
+
+    Checkpoints written before the width became configurable do not record it,
+    and rebuilding one at the config's current width raises a shape mismatch
+    that reads like corruption. The first encoder conv is ``(width, in_ch, k, k)``
+    and each encoder block is one level, so both are recoverable from the
+    weights themselves.
+    """
+    width = int(state_dict["encoders.0.0.weight"].shape[0])
+    depth = sum(1 for k in state_dict if k.startswith("encoders.") and k.endswith(".0.weight"))
+    return {"width": width, "depth": max(depth, 1)}
+
+
 #: the 2D case is what section 03's data path uses
 UNet2D = UNet
 
@@ -146,6 +160,10 @@ def build_model(cfg, spatial_dims: int | None = None, example=None, **kwargs) ->
             spatial_dims = int(example.ndim) - 2
         else:
             spatial_dims = int(cfg.data.get("spatial_dims", 2))
+    # width/depth come from the config unless a caller overrides them, so a
+    # checkpoint trained at one size is not silently rebuilt at another.
+    kwargs.setdefault("width", cfg.model_width)
+    kwargs.setdefault("depth", cfg.model_depth)
     return UNet(
         in_channels=len(cfg.modalities),
         num_classes=cfg.num_classes,
