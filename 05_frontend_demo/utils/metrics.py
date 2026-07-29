@@ -81,6 +81,69 @@ def auc(fpr: np.ndarray, tpr: np.ndarray) -> float:
     return float(np.trapezoid(tpr, fpr)) if hasattr(np, "trapezoid") else float(np.trapz(tpr, fpr))
 
 
+def confusion_rates(pred_mask: np.ndarray, true_mask: np.ndarray) -> dict:
+    """TP/FP/FN/TN counts for one binary region on one slice.
+
+    Returned as raw counts, not rates: rates have to be pooled over the whole
+    evaluation set, and averaging per-slice rates would weight a slice with
+    three tumour pixels the same as one with three thousand.
+    """
+    p = np.asarray(pred_mask, dtype=bool)
+    t = np.asarray(true_mask, dtype=bool)
+    return {
+        "tp": int((p & t).sum()),
+        "fp": int((p & ~t).sum()),
+        "fn": int((~p & t).sum()),
+        "tn": int((~p & ~t).sum()),
+    }
+
+
+def rates_from_counts(c: dict) -> dict:
+    """Sensitivity / specificity / precision / Dice from pooled counts."""
+    tp, fp, fn, tn = c["tp"], c["fp"], c["fn"], c["tn"]
+    def div(a, b):
+        return (a / b) if b else None
+    return {
+        "sensitivity": div(tp, tp + fn),
+        "specificity": div(tn, tn + fp),
+        "precision": div(tp, tp + fp),
+        "dice": div(2 * tp, 2 * tp + fp + fn),
+        **c,
+    }
+
+
+def hd95(pred_mask: np.ndarray, true_mask: np.ndarray, spacing_mm: float = 1.0):
+    """95th-percentile Hausdorff distance in mm between two 2D masks.
+
+    Returns None when either mask is empty -- the distance is undefined, and
+    substituting 0 would read as a perfect boundary match.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    p = np.asarray(pred_mask, dtype=bool)
+    t = np.asarray(true_mask, dtype=bool)
+    if not p.any() or not t.any():
+        return None
+
+    # distance from every pixel to the nearest surface pixel of the other mask
+    dist_to_t = distance_transform_edt(~t) * spacing_mm
+    dist_to_p = distance_transform_edt(~p) * spacing_mm
+
+    p_border = p & ~_erode(p)
+    t_border = t & ~_erode(t)
+    if not p_border.any() or not t_border.any():
+        return None
+
+    d = np.concatenate([dist_to_t[p_border], dist_to_p[t_border]])
+    return float(np.percentile(d, 95))
+
+
+def _erode(mask: np.ndarray) -> np.ndarray:
+    from scipy.ndimage import binary_erosion
+
+    return binary_erosion(mask, border_value=0)
+
+
 def _stratified_sample(pos_mask: np.ndarray, max_pixels: int, rng) -> np.ndarray:
     """Indices keeping every positive pixel plus a bounded draw of negatives."""
     pos_idx = np.flatnonzero(pos_mask)
@@ -107,6 +170,8 @@ def collect_scores(checkpoint_path, cache_dir, subjects, plane: str = "axial",
     model, type_head, cfg, meta = load_model(checkpoint_path, str(cache_dir), device=device)
 
     pooled = {r: {"scores": [], "labels": []} for r in REGIONS}
+    counts = {r: {"tp": 0, "fp": 0, "fn": 0, "tn": 0} for r in REGIONS}
+    hd_samples = {r: [] for r in REGIONS}
     n_slices = 0
 
     for n, sid in enumerate(subjects, 1):
@@ -121,12 +186,24 @@ def collect_scores(checkpoint_path, cache_dir, subjects, plane: str = "axial",
             r = predict_slice(model, cfg, cache_dir, sid, plane, tumor_idx[p], device=device)
             probs = r["probabilities"]
             truth = r["ground_truth"]
+            pred = r["prediction"]
             for region, labels in REGIONS.items():
-                score = probs[list(labels)].sum(axis=0).ravel()
-                positive = np.isin(truth, list(labels)).ravel()
-                keep = _stratified_sample(positive, max_pixels_per_slice, rng)
-                pooled[region]["scores"].append(score[keep])
-                pooled[region]["labels"].append(positive[keep])
+                score = probs[list(labels)].sum(axis=0)
+                positive = np.isin(truth, list(labels))
+                predicted = np.isin(pred, list(labels))
+
+                # counts over EVERY pixel -- these are exact, not sampled
+                c = confusion_rates(predicted, positive)
+                for k in counts[region]:
+                    counts[region][k] += c[k]
+                d = hd95(predicted, positive)
+                if d is not None:
+                    hd_samples[region].append(d)
+
+                # ROC pools a stratified sample; see the module docstring
+                keep = _stratified_sample(positive.ravel(), max_pixels_per_slice, rng)
+                pooled[region]["scores"].append(score.ravel()[keep])
+                pooled[region]["labels"].append(positive.ravel()[keep])
             n_slices += 1
         if progress:
             progress(n, len(subjects))
@@ -140,11 +217,16 @@ def collect_scores(checkpoint_path, cache_dir, subjects, plane: str = "axial",
         scores = np.concatenate(pooled[region]["scores"])
         labels = np.concatenate(pooled[region]["labels"])
         fpr, tpr, _ = roc_curve(scores, labels)
+        hd = hd_samples[region]
         out["regions"][region] = {
             "fpr": fpr, "tpr": tpr,
             "auc": auc(fpr, tpr) if fpr is not None else None,
             "n_pixels": int(scores.size),
             "n_positive": int(labels.sum()),
             "prevalence": float(labels.mean()),
+            # exact, over all pixels of every scored slice
+            **rates_from_counts(counts[region]),
+            "hd95_median_mm": float(np.median(hd)) if hd else None,
+            "hd95_n_slices": len(hd),
         }
     return out

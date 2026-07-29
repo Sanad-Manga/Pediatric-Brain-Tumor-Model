@@ -79,8 +79,20 @@ def main(argv=None) -> int:
             "n_pixels": v["n_pixels"],
             "n_positive": v["n_positive"],
             "prevalence": v["prevalence"],
+            "dice": v["dice"],
+            "sensitivity": v["sensitivity"],
+            "specificity": v["specificity"],
+            "precision": v["precision"],
+            "hd95_median_mm": v["hd95_median_mm"],
+            "hd95_n_slices": v["hd95_n_slices"],
+            "tp": v["tp"], "fp": v["fp"], "fn": v["fn"], "tn": v["tn"],
         }
-        print(f"  {region}: AUC={v['auc']:.4f}  prevalence={v['prevalence']:.3f}")
+        def fmt(x, suffix=""):
+            return "n/a" if x is None else f"{x:.4f}{suffix}"
+
+        print(f"  {region}: AUC={fmt(v['auc'])}  Dice={fmt(v['dice'])}  "
+              f"sens={fmt(v['sensitivity'])}  spec={fmt(v['specificity'])}  "
+              f"HD95={fmt(v['hd95_median_mm'], 'mm')}")
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
