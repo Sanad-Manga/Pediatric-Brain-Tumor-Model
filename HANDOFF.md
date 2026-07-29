@@ -2,6 +2,29 @@
 
 Paste this whole file as the first message of a new chat.
 
+**Working directory (open a chat here — do not paste files, just point at these paths):**
+```
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e
+```
+Sub-directories referenced throughout:
+```
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval          # pipeline, training, evaluation
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/src      # train.py, model.py, plan.py, evaluate.py, tumor_type.py
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/tools    # history_from_log.py, make_report.py
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/checkpoints/overnight_run   # best.pt / last.pt / history.json
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo              # Streamlit demo
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/utils        # inference.py, metrics.py, loaders.py, build_metrics_cache.py
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/pages        # Streamlit pages
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/data         # roc_cache.json (the measured numbers)
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/00_shared/manifests           # hospitalA.json, hospitalB.json, heldout.json
+```
+Data (outside the repo):
+```
+D:/pack_out            # packed 8000-budget cache used for all training so far (5.7 GB)
+D:/pack_out/index.json # tumour/ET presence per subject+plane
+E:/Processed_2D        # FULL slice cache, 227 subjects, 97,867 slices (external drive)
+```
+
 **Repo:** `Sanad-Manga/Pediatric-Brain-Tumor-Model`
 **Branch:** `claude/medical-ai-augmentation-eval-7f4098` (1 commit ahead of `main`; earlier work already merged via PR #11)
 **Latest commit:** `d1b8e15`

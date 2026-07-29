@@ -1,5 +1,16 @@
 # Brief: keeping the Streamlit demo's numbers honest
 
+**Working directory (point at these paths; nothing needs pasting):**
+```
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo              # run the app from here
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/utils        # inference.py, metrics.py, loaders.py, build_metrics_cache.py
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/pages        # the 9 Streamlit pages
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/components   # theme.py (light palette)
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/data         # roc_cache.json -- the measured numbers every page reads
+D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/checkpoints/overnight_run   # best.pt + history.json
+```
+Slice cache: `D:/pack_out` (override with the `NEUROFED_CACHE_2D` env var).
+
 **Repo:** `Sanad-Manga/Pediatric-Brain-Tumor-Model`
 **Branch with the latest UI work:** `claude/medical-ai-augmentation-eval-7f4098`
 **App entry point:** `05_frontend_demo/Home.py` → `streamlit run 05_frontend_demo/Home.py`
