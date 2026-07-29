@@ -197,21 +197,43 @@ def _normalisation_looks_per_slice(samples) -> bool:
     return (max(means) - min(means)) < 0.02 and all(abs(s - 1.0) < 0.02 for s in stds)
 
 
-def build_index(cache_dir, planes=None, subjects=None, progress_every: int = 25) -> dict:
+def build_index(cache_dir, planes=None, subjects=None, progress_every: int = 10,
+                update: bool = False) -> dict:
     """Scan every mask once and record which slices contain tumour / ET.
 
     This is the expensive pass (~90,000 files for the full cohort) and the whole
     reason the index exists: `plan` needs tumour presence *before* it selects
     slices, and re-deriving it per run would dominate runtime.
+
+    With ``update``, subjects already in the existing index are carried over
+    untouched and only new ones are scanned -- the dataset arrives in batches,
+    and rescanning everything on each batch would cost more every time.
     """
     cache_dir = Path(cache_dir)
     planes = list(planes) if planes else ["axial", "coronal"]
     subjects = list(subjects) if subjects else list_subjects(cache_dir)
 
     index = {"modalities": list(MODALITY_ORDER), "planes": planes, "subjects": {}}
-    norm_samples = []
-    total_files = 0
+    carried = 0
+    if update:
+        try:
+            previous = read_index(cache_dir)
+        except FileNotFoundError:
+            previous = None
+        if previous:
+            known = previous.get("subjects", {})
+            index["subjects"] = {s: e for s, e in known.items() if s in set(subjects)}
+            carried = len(index["subjects"])
+            subjects = [s for s in subjects if s not in index["subjects"]]
+            LOGGER.info("update: carrying %d indexed subjects, scanning %d new",
+                        carried, len(subjects))
 
+    norm_samples = []
+    total_files = sum(
+        p["n_slices"] for e in index["subjects"].values() for p in e.values()
+    )
+
+    corrupt: list[str] = []
     for n, subject_id in enumerate(subjects, 1):
         entry = {}
         for plane in planes:
@@ -224,29 +246,45 @@ def build_index(cache_dir, planes=None, subjects=None, progress_every: int = 25)
                 # dropped edge slices run e.g. 8..134, and a prediction volume
                 # restacked on positions would be silently misaligned.
                 i = slice_number(path)
+                try:
+                    with np.load(path, allow_pickle=False) as npz:
+                        if "mask" not in npz.files or "image" not in npz.files:
+                            raise KeyError(f"missing keys, has {npz.files}")
+                        mask = npz["mask"]
+                        if shape is None:
+                            shape = list(mask.shape[-2:])
+                        flat = mask.reshape(-1)
+                        if flat.any():
+                            tumor.append(i)
+                            if (flat == 1).any():
+                                et.append(i)
+                        # sample a few images to sanity-check the normalisation
+                        if len(norm_samples) < 8 and position and position % 40 == 0:
+                            img = npz["image"][0]
+                            brain = img[img != 0]
+                            if brain.size > 100:
+                                norm_samples.append((float(brain.mean()), float(brain.std())))
+                except Exception as exc:
+                    # One bad file must not lose 15 minutes of scanning: skip it,
+                    # name it, and keep going. A corrupt file is background either
+                    # way, so it costs nothing to treat it as an empty slice.
+                    LOGGER.warning("unreadable slice, skipping: %s (%s)", path, exc)
+                    corrupt.append(str(path))
+                    continue
                 indices.append(i)
-                with np.load(path, allow_pickle=False) as npz:
-                    mask = npz["mask"]
-                    if shape is None:
-                        shape = list(mask.shape[-2:])
-                    flat = mask.reshape(-1)
-                    if flat.any():
-                        tumor.append(i)
-                        if (flat == 1).any():
-                            et.append(i)
-                    # sample a few images to sanity-check the normalisation
-                    if len(norm_samples) < 8 and position and position % 40 == 0:
-                        img = npz["image"][0]
-                        brain = img[img != 0]
-                        if brain.size > 100:
-                            norm_samples.append((float(brain.mean()), float(brain.std())))
             total_files += len(files)
-            entry[plane] = {"n_slices": len(files), "shape": shape,
+            entry[plane] = {"n_slices": len(indices), "shape": shape,
                             "indices": indices, "tumor": tumor, "et": et}
         if entry:
             index["subjects"][subject_id] = entry
         if progress_every and n % progress_every == 0:
-            LOGGER.info("indexed %d/%d subjects (%d slice files)", n, len(subjects), total_files)
+            LOGGER.info("indexed %d/%d subjects (%d slice files, %d corrupt)",
+                        n, len(subjects), total_files, len(corrupt))
+
+    if corrupt:
+        LOGGER.warning("%d unreadable slice file(s) skipped; see index['corrupt_files']",
+                       len(corrupt))
+    index["corrupt_files"] = corrupt
 
     if _normalisation_looks_per_slice(norm_samples):
         LOGGER.warning(
@@ -257,6 +295,8 @@ def build_index(cache_dir, planes=None, subjects=None, progress_every: int = 25)
 
     index["n_subjects"] = len(index["subjects"])
     index["n_slice_files"] = total_files
+    index["n_scanned_now"] = len(subjects)
+    index["n_carried_over"] = carried
     return index
 
 

@@ -36,6 +36,7 @@ import torch
 from .config import Config
 from .dataset import EvalSubjectDataset
 from .dummy import DummySegNet2D, load_checkpoint
+from .model import build_model
 from .metrics import (
     REGION_ORDER,
     aggregate,
@@ -224,13 +225,26 @@ def run(
 
     dataset, subjects = build_eval_dataset(cfg, dummy_data, dummy_n, cache_dir, tmp_dir)
 
-    model = DummySegNet2D(in_channels=len(cfg.modalities), num_classes=cfg.num_classes)
     if dummy_checkpoint:
         LOGGER.warning(
             "running against a randomly-initialised DummySegNet2D - the Dice numbers "
             "are pipeline validation only, not model performance"
         )
+        model = DummySegNet2D(in_channels=len(cfg.modalities), num_classes=cfg.num_classes)
     else:
+        if not Path(checkpoint).exists():
+            raise FileNotFoundError(f"checkpoint not found: {checkpoint}")
+        # The checkpoint declares what to rebuild. `spatial_dims` matters because
+        # the same network trains on slices or volumes, and evaluation has to
+        # match what was trained.
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+        meta = payload if isinstance(payload, dict) else {}
+        architecture = str(meta.get("architecture", "unet"))
+        if architecture == "dummy":
+            model = DummySegNet2D(in_channels=len(cfg.modalities),
+                                  num_classes=cfg.num_classes)
+        else:
+            model = build_model(cfg, spatial_dims=int(meta.get("spatial_dims", 2)))
         model = load_checkpoint(checkpoint, model)
     model = model.to(device).eval()
 

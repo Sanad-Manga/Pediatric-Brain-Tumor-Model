@@ -26,7 +26,7 @@ if str(HERE) not in sys.path:
 
 from src.config import load_config  # noqa: E402
 
-COMMANDS = ("test", "index", "plan", "preview", "eval")
+COMMANDS = ("test", "index", "tumor-type", "plan", "pack", "train", "preview", "eval")
 
 
 # ------------------------------------------------------------------ run.py test
@@ -61,11 +61,19 @@ def cmd_index(args) -> int:
     if args.limit:
         subjects = subjects[: args.limit]
 
-    index = build_index(cache_dir, planes=planes, subjects=subjects)
+    index = build_index(cache_dir, planes=planes, subjects=subjects, update=args.update)
     path = write_index(index, cache_dir)
 
     print(f"planes indexed: {', '.join(planes)} (sagittal not used)")
-    print(f"subjects: {index['n_subjects']}    slice files scanned: {index['n_slice_files']}")
+    if args.update:
+        print(f"carried over: {index['n_carried_over']}    newly scanned: {index['n_scanned_now']}")
+    print(f"subjects: {index['n_subjects']}    slice files: {index['n_slice_files']}")
+    if index.get("corrupt_files"):
+        print(f"WARNING: {len(index['corrupt_files'])} unreadable slice file(s) skipped:")
+        for p in index["corrupt_files"][:10]:
+            print(f"  {p}")
+        if len(index["corrupt_files"]) > 10:
+            print(f"  ... and {len(index['corrupt_files']) - 10} more")
     tumor = sum(len(p["tumor"]) for s in index["subjects"].values() for p in s.values())
     et = sum(len(p["et"]) for s in index["subjects"].values() for p in s.values())
     if index["n_slice_files"]:
@@ -102,6 +110,90 @@ def cmd_plan(args) -> int:
 
     for path in written:
         print(f"wrote: {path.resolve()}")
+    return 0
+
+
+# ------------------------------------------------------------------ run.py pack
+def cmd_pack(args) -> int:
+    """Shrink the cache to what training and evaluation actually read."""
+    from src.pack import pack
+
+    cfg = load_config(args.config)
+    manifest = pack(
+        cfg,
+        out_dir=Path(args.out),
+        src_cache=Path(args.cache) if args.cache else None,
+        half=not args.full_precision,
+        include_heldout=not args.no_heldout,
+    )
+    print(f"slices copied: {manifest['slices_copied']} "
+          f"({manifest['training_slices']} training + held-out)")
+    print(f"held-out subjects: {manifest['heldout_subjects']}")
+    print(f"precision: {'float16' if manifest['float16'] else 'float32'}")
+    print(f"size: {manifest['gigabytes']} GB")
+    print(f"wrote: {Path(args.out).resolve()}")
+    print(f"wrote: {(Path(args.out) / 'plans').resolve()}  (ship these with the data)")
+    return 0
+
+
+# ------------------------------------------------------------ run.py tumor-type
+def cmd_tumor_type(args) -> int:
+    """Classify every subject with the geometric DMG-like/astrocytoma-like proxy.
+
+    NOT histology -- see src/tumor_type.py. Used to train the auxiliary
+    classification head in `run.py train`, and standalone here for anyone who
+    wants the per-subject table without training.
+    """
+    from src.slices import load_manifest
+    from src.tumor_type import build_type_index, write_type_index
+
+    cfg = load_config(args.config)
+    cache_dir = Path(args.cache) if args.cache else cfg.resolve("cache_2d")
+    manifest_dir = cfg.resolve("manifests")
+
+    subjects = []
+    for name in ("hospitalA", "hospitalB", "heldout"):
+        subjects.extend(load_manifest(manifest_dir, name))
+
+    index = build_type_index(cache_dir, subjects, cfg, plane=args.plane)
+    path = write_type_index(index, cache_dir)
+
+    print("NOT histology -- geometric proxy from segmentation mask geometry only")
+    print(f"subjects classified: {len(index['subjects'])} of {len(subjects)}")
+    for stratum, n in sorted(index["counts"].items()):
+        print(f"  {stratum:18s} {n}")
+    print(f"wrote: {path.resolve()}")
+    return 0
+
+
+# ----------------------------------------------------------------- run.py train
+def cmd_train(args) -> int:
+    from src import train
+
+    cfg = load_config(
+        args.config,
+        use_augmentation=args.use_augmentation,
+        use_mixup=args.use_mixup,
+    )
+    summary = train.run(
+        cfg,
+        run_id=args.run_id,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        val_fraction=args.val_fraction,
+        max_steps_per_epoch=args.max_steps,
+        cache_dir=Path(args.cache) if args.cache else None,
+        device=args.device,
+        resume=not args.no_resume,
+    )
+    ckpt = Path(summary["checkpoint_dir"])
+    print(f"\nbest mean_dice: {summary['best_mean_dice']}")
+    print(f"validation patients ({len(summary['val_subjects'])}): "
+          f"{', '.join(summary['val_subjects'])}")
+    print(f"wrote: {(ckpt / 'best.pt').resolve()}")
+    print(f"wrote: {(ckpt / 'last.pt').resolve()}")
+    print(f"wrote: {(ckpt / 'history.json').resolve()}")
     return 0
 
 
@@ -224,6 +316,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_index.add_argument("--cache", default=None, help="override paths.cache_2d")
     p_index.add_argument("--limit", type=int, default=None, help="only the first N subjects")
     p_index.add_argument("--planes", default=None, help="comma-separated, default axial,coronal")
+    p_index.add_argument("--update", action="store_true",
+                         help="keep already-indexed subjects, scan only new ones "
+                              "(use after each upload batch)")
     p_index.set_defaults(func=cmd_index)
 
     p_plan = sub.add_parser("plan", help="build the balanced per-hospital slice plan")
@@ -231,6 +326,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan.add_argument("--cache", default=None, help="override paths.cache_2d")
     p_plan.add_argument("--out", default=None, help="override paths.plans_dir")
     p_plan.set_defaults(func=cmd_plan)
+
+    p_pack = sub.add_parser("pack", help="shrink the cache to what is actually used")
+    p_pack.add_argument("--out", required=True, help="destination directory to upload")
+    p_pack.add_argument("--cache", default=None, help="override paths.cache_2d (the source)")
+    p_pack.add_argument("--full-precision", action="store_true",
+                        help="keep float32 instead of halving to float16")
+    p_pack.add_argument("--no-heldout", action="store_true",
+                        help="training slices only; cannot run eval remotely")
+    p_pack.set_defaults(func=cmd_pack)
+
+    p_type = sub.add_parser("tumor-type", help="classify subjects: DMG-like vs astrocytoma-like proxy")
+    p_type.add_argument("--cache", default=None, help="override paths.cache_2d")
+    p_type.add_argument("--plane", default="axial", choices=["axial", "coronal"])
+    p_type.set_defaults(func=cmd_tumor_type)
+
+    p_train = sub.add_parser("train", help="train the segmentation model, save checkpoints")
+    p_train.add_argument("--run-id", default="run1", help="checkpoints/<run_id>/")
+    p_train.add_argument("--epochs", type=int, default=5)
+    p_train.add_argument("--batch-size", type=int, default=8)
+    p_train.add_argument("--lr", type=float, default=1e-3)
+    p_train.add_argument("--val-fraction", type=float, default=0.25,
+                         help="fraction of training PATIENTS held out for validation")
+    p_train.add_argument("--max-steps", type=int, default=None,
+                         help="cap steps per epoch (short runs on CPU)")
+    p_train.add_argument("--cache", default=None, help="override paths.cache_2d")
+    p_train.add_argument("--device", default="cpu")
+    p_train.add_argument("--no-resume", action="store_true",
+                         help="ignore an existing checkpoint and start fresh")
+    for flag in ("use-augmentation", "use-mixup"):
+        dest = flag.replace("-", "_")
+        p_train.add_argument(f"--{flag}", dest=dest, action="store_true", default=None)
+        p_train.add_argument(f"--no-{flag}", dest=dest, action="store_false", default=None)
+    p_train.set_defaults(func=cmd_train)
 
     p_prev = sub.add_parser("preview", help="save a PNG grid of augmented slices")
     p_prev.add_argument("--n", type=int, default=8, help="number of slices")

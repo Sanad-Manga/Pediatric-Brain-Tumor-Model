@@ -65,7 +65,8 @@ def save_dummy_checkpoint(path: Path, model: nn.Module | None = None, **meta) ->
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     model = model if model is not None else DummySegNet2D()
-    torch.save({"model_state_dict": model.state_dict(), **meta}, path)
+    torch.save({"model_state_dict": model.state_dict(),
+                "architecture": "dummy", **meta}, path)
     return path
 
 
