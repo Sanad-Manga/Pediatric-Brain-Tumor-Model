@@ -117,8 +117,9 @@ Going through each page visually is worth doing first.
 
 ## 4. How to regenerate metrics after new training
 
-The model is still training (resuming from epoch 24 toward 40). When a newer
-checkpoint lands:
+Training is stopped (Colab GPU quota exhausted at epoch 36). The shipped model
+is epoch 16. A larger model (width 48) on more data (15000/hospital) is
+configured but has not been trained. When a newer checkpoint lands:
 
 ```bash
 # 1. drop the new best.pt / last.pt into

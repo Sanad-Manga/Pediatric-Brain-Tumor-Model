@@ -27,7 +27,7 @@ E:/Processed_2D        # FULL slice cache, 227 subjects, 97,867 slices (external
 
 **Repo:** `Sanad-Manga/Pediatric-Brain-Tumor-Model`
 **Branch:** `claude/medical-ai-augmentation-eval-7f4098` (1 commit ahead of `main`; earlier work already merged via PR #11)
-**Latest commit:** `d1b8e15`
+**Latest commit:** see `git log -1` on the branch
 
 ---
 
