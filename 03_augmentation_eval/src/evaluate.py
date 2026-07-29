@@ -43,6 +43,7 @@ from .metrics import (
     count_empty_ground_truth,
     dice_regions,
 )
+from .postproc import DEFAULT_POSTPROC, probs_to_classes
 from .slices import load_manifest, unpad
 
 LOGGER = logging.getLogger(__name__)
@@ -129,12 +130,20 @@ def restack_volume(arr: np.ndarray, plane: str, cfg: Config, channelled: bool = 
 
 @torch.no_grad()
 def predict_slices(model, images: np.ndarray, device: str = "cpu") -> np.ndarray:
-    """Run the model over ``(N, C, H, W)``, returning ``(N, C_out, H, W)`` logits."""
+    """Run the model over ``(N, C, H, W)``, returning ``(N, C_out, H, W)`` logits.
+
+    On CUDA this runs under fp16 autocast -- inference only, and the logits are
+    cast straight back to float32 so softmax and every downstream metric stay in
+    single precision. On CPU autocast is disabled, so nothing measured on a CPU
+    box moves by a single bit.
+    """
+    on_cuda = str(device).startswith("cuda")
     outputs = []
     for start in range(0, images.shape[0], INFER_CHUNK):
         chunk = torch.as_tensor(images[start:start + INFER_CHUNK], dtype=torch.float32).to(device)
-        seg_logits, _features = model(chunk)
-        outputs.append(seg_logits.detach().cpu().numpy())
+        with torch.amp.autocast("cuda", enabled=on_cuda):
+            seg_logits, _features = model(chunk)
+        outputs.append(seg_logits.detach().float().cpu().numpy())
     return np.concatenate(outputs, axis=0)
 
 
@@ -142,6 +151,27 @@ def _softmax(logits: np.ndarray, axis: int = 1) -> np.ndarray:
     shifted = logits - logits.max(axis=axis, keepdims=True)
     exp = np.exp(shifted)
     return exp / exp.sum(axis=axis, keepdims=True)
+
+
+@torch.no_grad()
+def predict_probs(model, images: np.ndarray, device: str = "cpu",
+                  tta: bool = False) -> np.ndarray:
+    """Class probabilities for ``(N, C, H, W)`` slices, optionally flip-averaged.
+
+    Averaging happens in *probability* space, not logit space: logits from two
+    views are not on a common scale, so averaging them is not a defined
+    operation, while averaging probabilities is a plain ensemble.
+
+    With ``tta=False`` this is a softmax of :func:`predict_slices`, so any
+    downstream argmax gives bit-identical predictions to the pre-TTA code.
+    """
+    probs = _softmax(predict_slices(model, images, device=device), axis=1)
+    if not tta:
+        return probs
+
+    # ``.copy()`` is required: torch cannot wrap a negative-strided numpy view.
+    flipped = predict_slices(model, images[..., ::-1].copy(), device=device)
+    return 0.5 * (probs + _softmax(flipped, axis=1)[..., ::-1])
 
 
 @torch.no_grad()
@@ -155,9 +185,7 @@ def evaluate_subject(model, items, cfg: Config, device: str = "cpu"):
     if not items:
         raise ValueError("no cached planes for this subject")
 
-    plane_policy = cfg.eval_plane
     prob_sum = None
-    pred_volume = None
     true_volume = None
     planes_used = []
 
@@ -166,28 +194,27 @@ def evaluate_subject(model, items, cfg: Config, device: str = "cpu"):
         planes_used.append(plane)
         indices = item.get("slice_indices")
 
-        logits = predict_slices(model, item["images"], device=device)      # (N, C, H, W)
-        logits = unpad(logits, item["pad"])                                # native shape
+        probs = predict_probs(model, item["images"], device=device, tta=cfg.eval_tta)
+        probs = unpad(probs, item["pad"])                                  # native shape
         labels = unpad(item["labels"], item["pad"])                        # (N, H, W)
 
         true_volume = restack_volume(labels, plane, cfg, indices=indices)
 
-        if plane_policy == "both":
-            probs = _softmax(logits, axis=1).transpose(1, 0, 2, 3)         # (C, N, H, W)
-            volume_probs = restack_volume(probs, plane, cfg, channelled=True,
-                                          indices=indices)
-            prob_sum = volume_probs if prob_sum is None else prob_sum + volume_probs
-        else:
-            pred_volume = restack_volume(np.argmax(logits, axis=1), plane, cfg,
-                                         indices=indices)
+        volume_probs = restack_volume(probs.transpose(1, 0, 2, 3), plane, cfg,
+                                      channelled=True, indices=indices)
+        prob_sum = volume_probs if prob_sum is None else prob_sum + volume_probs
 
-    if plane_policy == "both":
-        pred_volume = np.argmax(prob_sum, axis=0)
+    # Mean rather than sum so a single-plane subject under the ``both`` policy is
+    # still on the same probability scale -- et_boost is a threshold on that
+    # scale, and would otherwise mean something different per subject.
+    prob_volume = prob_sum / len(planes_used)
+    pred_volume = probs_to_classes(prob_volume, **cfg.postproc)
 
     return dice_regions(pred_volume, true_volume), true_volume, planes_used
 
 
-def build_eval_dataset(cfg: Config, dummy_data: bool, dummy_n: int, cache_dir=None, tmp_dir=None):
+def build_eval_dataset(cfg: Config, dummy_data: bool, dummy_n: int, cache_dir=None,
+                       tmp_dir=None, subjects: list | None = None):
     """The held-out evaluation set, or a synthetic stand-in for ``--dummy-data``."""
     if dummy_data:
         from .dummy import DUMMY_VOLUME_SHAPE, make_dummy_cache
@@ -202,8 +229,16 @@ def build_eval_dataset(cfg: Config, dummy_data: bool, dummy_n: int, cache_dir=No
         make_dummy_cache(tmp_dir, subjects, cfg, volume_shape=DUMMY_VOLUME_SHAPE, seed=0)
         return EvalSubjectDataset(subjects, cfg, cache_dir=tmp_dir), subjects
 
-    subjects = load_manifest(cfg.resolve("manifests"), "heldout")
-    LOGGER.info("evaluating on %d held-out subjects", len(subjects))
+    if subjects is None:
+        subjects = load_manifest(cfg.resolve("manifests"), "heldout")
+        LOGGER.info("evaluating on %d held-out subjects", len(subjects))
+    else:
+        # Tuning path: these are the training-hospital validation patients, not
+        # the held-out institution. Loud on purpose -- a tuning number quoted as
+        # a held-out result is the single easiest way to overstate this model.
+        LOGGER.warning("evaluating on %d CALLER-SUPPLIED subjects (not the "
+                       "held-out manifest) -- not a generalisation estimate",
+                       len(subjects))
     return EvalSubjectDataset(subjects, cfg, cache_dir=cache_dir), subjects
 
 
@@ -218,12 +253,15 @@ def run(
     csv_path: str | Path | None = None,
     device: str = "cpu",
     tmp_dir: Path | None = None,
+    subjects: list | None = None,
+    write_csv: bool = True,
 ) -> dict:
     """Evaluate one configuration and append its row. Returns the written row."""
     if checkpoint is None and not dummy_checkpoint:
         raise ValueError("provide --checkpoint <path> or --dummy-checkpoint")
 
-    dataset, subjects = build_eval_dataset(cfg, dummy_data, dummy_n, cache_dir, tmp_dir)
+    dataset, subjects = build_eval_dataset(cfg, dummy_data, dummy_n, cache_dir, tmp_dir,
+                                           subjects=subjects)
 
     if dummy_checkpoint:
         LOGGER.warning(
@@ -294,18 +332,22 @@ def run(
     row["mean_dice"] = round((row["dice_ET"] + row["dice_NC"] + row["dice_WT"]) / 3.0, 6)
 
     out = Path(csv_path) if csv_path else cfg.resolve("results_csv")
-    append_result_row(row, out)
+    if write_csv:
+        append_result_row(row, out)
 
     print(f"\n{experiment_name}: " +
           "  ".join(f"{r}={row[f'dice_{r}']:.4f}" for r in REGION_ORDER))
     print(f"  mean_dice={row['mean_dice']:.4f}")
     print(f"  scored {len(per_subject)} subjects per patient from restacked volumes")
-    print(f"  eval plane policy: {cfg.eval_plane}")
+    print(f"  eval plane policy: {cfg.eval_plane}   tta: {cfg.eval_tta}")
+    pp = cfg.postproc
+    if pp != DEFAULT_POSTPROC:
+        print("  post-processing: " + "  ".join(f"{k}={v}" for k, v in pp.items()))
     print("  subjects with an empty ground-truth region: " +
           ", ".join(f"{r}={empty_gt[r]}" for r in REGION_ORDER))
     if single_plane:
         print(f"  single-plane subjects (expected both): {len(single_plane)}")
-    print(f"  wrote: {out}")
+    print(f"  wrote: {out}" if write_csv else "  (CSV write skipped)")
 
     row["_empty_ground_truth"] = empty_gt
     row["_n_subjects"] = len(per_subject)

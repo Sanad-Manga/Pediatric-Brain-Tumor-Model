@@ -163,6 +163,40 @@ class Config:
         return str(self.selection.get("metric", "mean")).lower()
 
     @property
+    def eval_tta(self) -> bool:
+        """Average predictions over the slice and its horizontal flip.
+
+        Off by default: with it off the probability path is bit-identical to the
+        pre-TTA code, so no existing number moves by enabling this file.
+        """
+        return bool(self.eval.get("tta", False))
+
+    @property
+    def postproc(self) -> dict:
+        """``eval.postproc`` with defaults filled in and types coerced.
+
+        Returned as kwargs for :func:`src.postproc.probs_to_classes`. Unknown
+        keys are a hard error rather than a silent no-op -- a typo'd knob that
+        quietly does nothing looks exactly like a knob that does not help.
+        """
+        from .postproc import DEFAULT_POSTPROC
+
+        raw = dict(self.eval.get("postproc", {}))
+        unknown = set(raw) - set(DEFAULT_POSTPROC)
+        if unknown:
+            raise KeyError(
+                f"unknown eval.postproc key(s) {sorted(unknown)}; "
+                f"expected {sorted(DEFAULT_POSTPROC)}"
+            )
+        return {
+            "et_boost": float(raw.get("et_boost", DEFAULT_POSTPROC["et_boost"])),
+            "keep_largest_wt": bool(raw.get("keep_largest_wt",
+                                            DEFAULT_POSTPROC["keep_largest_wt"])),
+            "min_component_voxels": int(raw.get("min_component_voxels",
+                                                DEFAULT_POSTPROC["min_component_voxels"])),
+        }
+
+    @property
     def eval_plane(self) -> str:
         plane = str(self.eval.get("plane", "axial"))
         if plane not in (*PLANES, "both"):

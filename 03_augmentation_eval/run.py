@@ -186,6 +186,8 @@ def cmd_train(args) -> int:
         cache_dir=Path(args.cache) if args.cache else None,
         device=args.device,
         resume=not args.no_resume,
+        amp=args.amp,
+        num_workers=args.num_workers,
     )
     ckpt = Path(summary["checkpoint_dir"])
     print(f"\nbest mean_dice: {summary['best_mean_dice']}")
@@ -280,6 +282,16 @@ def cmd_eval(args) -> int:
     )
     if args.eval_plane:
         cfg.eval["plane"] = args.eval_plane
+    if args.tta is not None:
+        cfg.eval["tta"] = args.tta
+
+    postproc = {k: v for k, v in (
+        ("et_boost", args.et_boost),
+        ("keep_largest_wt", args.keep_largest_wt),
+        ("min_component_voxels", args.min_component_voxels),
+    ) if v is not None}
+    if postproc:
+        cfg.eval["postproc"] = {**cfg.eval.get("postproc", {}), **postproc}
 
     with tempfile.TemporaryDirectory() as tmp:
         evaluate.run(
@@ -352,6 +364,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="cap steps per epoch (short runs on CPU)")
     p_train.add_argument("--cache", default=None, help="override paths.cache_2d")
     p_train.add_argument("--device", default="cpu")
+    p_train.add_argument("--no-amp", dest="amp", action="store_false", default=None,
+                         help="disable fp16 autocast (on by default on CUDA)")
+    p_train.add_argument("--num-workers", type=int, default=0,
+                         help="DataLoader worker processes; 2-4 helps on Colab")
     p_train.add_argument("--no-resume", action="store_true",
                          help="ignore an existing checkpoint and start fresh")
     for flag in ("use-augmentation", "use-mixup"):
@@ -380,6 +396,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--eval-plane", default=None, choices=["axial", "coronal", "both"],
                         help="override eval.plane")
     p_eval.add_argument("--device", default="cpu")
+    p_eval.add_argument("--tta", dest="tta", action="store_true", default=None,
+                        help="average each slice with its horizontal flip")
+    p_eval.add_argument("--no-tta", dest="tta", action="store_false", default=None)
+    p_eval.add_argument("--et-boost", type=float, default=None,
+                        help="scale the ET probability channel before argmax (1.0 = off)")
+    p_eval.add_argument("--keep-largest-wt", action="store_true", default=None,
+                        help="keep only the largest connected lesion")
+    p_eval.add_argument("--min-component-voxels", type=int, default=None,
+                        help="drop connected components smaller than N voxels")
     for flag in ("use-augmentation", "use-federation", "use-domain-adaptation"):
         dest = flag.replace("-", "_")
         p_eval.add_argument(f"--{flag}", dest=dest, action="store_true", default=None)
