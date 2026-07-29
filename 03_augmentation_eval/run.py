@@ -280,6 +280,16 @@ def cmd_eval(args) -> int:
     )
     if args.eval_plane:
         cfg.eval["plane"] = args.eval_plane
+    if args.tta is not None:
+        cfg.eval["tta"] = args.tta
+
+    postproc = {k: v for k, v in (
+        ("et_boost", args.et_boost),
+        ("keep_largest_wt", args.keep_largest_wt),
+        ("min_component_voxels", args.min_component_voxels),
+    ) if v is not None}
+    if postproc:
+        cfg.eval["postproc"] = {**cfg.eval.get("postproc", {}), **postproc}
 
     with tempfile.TemporaryDirectory() as tmp:
         evaluate.run(
@@ -380,6 +390,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--eval-plane", default=None, choices=["axial", "coronal", "both"],
                         help="override eval.plane")
     p_eval.add_argument("--device", default="cpu")
+    p_eval.add_argument("--tta", dest="tta", action="store_true", default=None,
+                        help="average each slice with its horizontal flip")
+    p_eval.add_argument("--no-tta", dest="tta", action="store_false", default=None)
+    p_eval.add_argument("--et-boost", type=float, default=None,
+                        help="scale the ET probability channel before argmax (1.0 = off)")
+    p_eval.add_argument("--keep-largest-wt", action="store_true", default=None,
+                        help="keep only the largest connected lesion")
+    p_eval.add_argument("--min-component-voxels", type=int, default=None,
+                        help="drop connected components smaller than N voxels")
     for flag in ("use-augmentation", "use-federation", "use-domain-adaptation"):
         dest = flag.replace("-", "_")
         p_eval.add_argument(f"--{flag}", dest=dest, action="store_true", default=None)
