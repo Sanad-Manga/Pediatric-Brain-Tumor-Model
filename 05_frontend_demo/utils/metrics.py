@@ -37,13 +37,18 @@ REGIONS = {
 REGION_COLOURS = {"ET": "#EF4444", "TC": "#818CF8", "WT": "#38BDF8"}
 
 
-def roc_curve(scores: np.ndarray, labels: np.ndarray, n_thresholds: int = 200):
+def roc_curve(scores: np.ndarray, labels: np.ndarray, n_thresholds: int | None = None):
     """(fpr, tpr, thresholds) for binary ``labels`` and continuous ``scores``.
 
     Implemented directly rather than via sklearn to keep the demo's dependency
-    set unchanged. Thresholds are quantiles of the score distribution, so the
-    curve is dense where the scores actually live instead of wasting points on
-    empty probability ranges.
+    set unchanged.
+
+    ``n_thresholds`` down-samples the returned curve **for plotting only**.
+    Leave it None — the default — whenever the result feeds :func:`auc`:
+    thinning picks evenly spaced indices, which under-samples the elbow where
+    the curve turns, and integrating that shifts the AUC in the third or fourth
+    decimal. Compute the area on the full curve, thin afterwards with
+    :func:`thin_curve`.
     """
     scores = np.asarray(scores, dtype=np.float64).ravel()
     labels = np.asarray(labels).ravel().astype(bool)
@@ -70,10 +75,33 @@ def roc_curve(scores: np.ndarray, labels: np.ndarray, n_thresholds: int = 200):
     fpr = np.r_[0.0, fps[idx] / n_neg]
     thresholds = np.r_[np.inf, s_sorted[idx]]
 
-    if tpr.size > n_thresholds:                     # thin for plotting only
-        keep = np.unique(np.linspace(0, tpr.size - 1, n_thresholds).astype(int))
-        tpr, fpr, thresholds = tpr[keep], fpr[keep], thresholds[keep]
+    if n_thresholds is not None and tpr.size > n_thresholds:
+        fpr, tpr, thresholds = thin_curve(fpr, tpr, thresholds, n_thresholds)
     return fpr, tpr, thresholds
+
+
+def thin_curve(fpr, tpr, thresholds=None, n: int = 300):
+    """Reduce a ROC curve to ~``n`` points **for plotting**, keeping its shape.
+
+    Sampling evenly by index flattens the elbow, which is the only visually
+    interesting part of a curve with AUC ~0.99. Instead, walk the curve by arc
+    length so points are spent where it actually bends, and always keep the
+    first and last vertex so the axes still terminate at (0,0) and (1,1).
+    """
+    fpr = np.asarray(fpr, dtype=float)
+    tpr = np.asarray(tpr, dtype=float)
+    if fpr.size <= n:
+        return fpr, tpr, thresholds
+
+    step = np.hypot(np.diff(fpr), np.diff(tpr))
+    arc = np.concatenate([[0.0], np.cumsum(step)])
+    if arc[-1] <= 0:
+        keep = np.unique(np.linspace(0, fpr.size - 1, n).astype(int))
+    else:
+        targets = np.linspace(0.0, arc[-1], n)
+        keep = np.unique(np.searchsorted(arc, targets).clip(0, fpr.size - 1))
+    keep = np.unique(np.concatenate([[0], keep, [fpr.size - 1]]))
+    return fpr[keep], tpr[keep], (None if thresholds is None else np.asarray(thresholds)[keep])
 
 
 def auc(fpr: np.ndarray, tpr: np.ndarray) -> float:

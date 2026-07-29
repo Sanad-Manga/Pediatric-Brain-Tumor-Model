@@ -20,10 +20,13 @@ D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/00_shared
 ```
 Data (outside the repo):
 ```
-D:/pack_out            # packed 8000-budget cache used for all training so far (5.7 GB)
-D:/pack_out/index.json # tumour/ET presence per subject+plane
-E:/Processed_2D        # FULL slice cache, 227 subjects, 97,867 slices (external drive)
+D:/Processed_2D        # FULL slice cache -- 257 dirs, 97,867 .npz, verified complete
+D:/pack_out            # OLD 8000-budget pack (5.72 GB) -- every checkpoint so far trained on this
+D:/pack_out_15k        # NEW 15000-budget pack, READY TO UPLOAD (9.72 GB, 55,523 files)
+                       #   24,140 unique training slices + 82 held-out subjects, both planes
 ```
+`E:/Processed_2D` was the original external drive; it is unplugged and no longer
+needed -- `D:/Processed_2D` is the same complete cache.
 
 **Repo:** `Sanad-Manga/Pediatric-Brain-Tumor-Model`
 **Branch:** `claude/medical-ai-augmentation-eval-7f4098` (1 commit ahead of `main`; earlier work already merged via PR #11)
