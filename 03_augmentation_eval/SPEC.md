@@ -74,7 +74,12 @@ from restacked volumes into one contract-exact row of `results/ablation_results.
 4. `python run.py test` runs the full suite on CPU with no real cache, no NIfTI data and
    no trained checkpoint, and exits 0. It must not read `paths.cache_2d`.
 
-### A. Slice extraction (`run.py slices`)
+> **Amended after the team confirmed the data contract.** The 2D slices are produced from
+> the original volumes by the team and are the dataset from now on — this section consumes
+> them rather than exporting them. Requirements 5–9 below are superseded by §A′; the
+> `slices` command is replaced by `index`. Everything else stands unchanged.
+
+### A. Slice extraction (`run.py slices`) — SUPERSEDED, see §A′
 
 5. Given a source volume of shape `(240, 240, 155)` the extractor emits **axial** slices
    along the last axis (155 slices of `240×240`) and **coronal** slices along the middle
@@ -104,6 +109,36 @@ from restacked volumes into one contract-exact row of `results/ablation_results.
    **Assumption:** section 03 owns this exporter. `BRIEF_2D.md` §7 leaves ownership open
    ("confirm who owns it"), but §0 requires everything be reachable through `run.py`, so
    it ships here; it is a thin `nibabel` reader and costs little.
+
+### A′. Slice cache and index (`run.py index`) — replaces Reqs 5–9
+
+55. The cache layout is fixed by the team's exporter, one file per slice:
+    `<cache_2d>/<subject_id>/<plane>/slice_<NNN>.npz`, `plane ∈ {axial, coronal}`, with
+    - `image` — `(4, H, W)` `float32`, channels **`t1c, t1n, t2f, t2w`** in that order,
+      already z-scored per volume over non-zero (brain) voxels
+    - `mask` — `(1, H, W)` `uint8`, values ⊆ `{0,1,2,3,4}`
+
+    The four modalities are **not** stored as separate arrays; `image` is already the
+    stacked form the model consumes. Nothing in this section re-normalises or re-stacks.
+56. `run.py index` scans every mask once and writes `<cache_2d>/index.json` recording, per
+    subject and plane: `indices` (every slice present), `tumor` (mask has any non-zero
+    label) and `et` (mask contains label `1`). `plan` reads that index, never the masks.
+    Rationale: tumour presence is needed *before* slice selection, and deriving it means
+    opening ~90,000 files.
+57. **Every list in the index holds actual slice indices, never positions.** Subjects whose
+    blank edge slices were dropped run e.g. `slice_008..slice_134`; the number in the
+    filename is the volume position. A missing index file raises, naming the command that
+    builds it.
+58. `restack_volume` places each predicted slice at its **true volume position** into the
+    full `data.volume_shape`, leaving dropped slices as background. This keeps axial and
+    coronal restacks the same shape — which `eval.plane: both` requires in order to average
+    them — and keeps a prediction aligned with its ground truth. A dropped slice is
+    background in prediction and truth alike, so Dice is unaffected.
+59. `run.py index` warns if the cache looks **per-slice** normalised (brain mean/std pinned
+    to 0/1 on every slice) rather than per-volume, since that is invisible later and
+    changes what an intensity means from slice to slice.
+60. The cache is verified **internally coherent**: restacking a subject's masks from axial
+    and from coronal yields bitwise-identical volumes.
 
 ### Shape harmonization
 
@@ -467,3 +502,11 @@ tumor-type-level.
 
 **ET floor**
 - [ ] Req 54: `et_slice_ratio` floor met when supply allows; ET takes first claim on the tumour budget; shortage degrades gracefully without missing the target; `0.0` disables it; empty ceiling and per-patient cap still hold; `ET`/`ET%` in the report
+
+**Slice cache and index (replaces Reqs 5–9)**
+- [ ] Req 55: cache layout `<subject>/<plane>/slice_NNN.npz` with `image` (4,H,W) t1c/t1n/t2f/t2w and `mask` (1,H,W); no re-normalising, no re-stacking
+- [ ] Req 56: `run.py index` writes `index.json` with `indices`/`tumor`/`et`; `plan` reads it, never the masks
+- [ ] Req 57: index lists hold actual slice indices, not positions; missing index names the command that builds it
+- [ ] Req 58: `restack_volume` places slices at true volume positions into the full shape; axial and coronal restack to a common shape
+- [ ] Req 59: `index` warns on a per-slice-normalised cache
+- [ ] Req 60: cache verified internally coherent — axial and coronal restack to identical volumes

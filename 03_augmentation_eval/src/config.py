@@ -40,6 +40,7 @@ class Config:
     expansion: dict = field(default_factory=dict)
     sampler: dict = field(default_factory=dict)
     eval: dict = field(default_factory=dict)
+    tumor_type: dict = field(default_factory=dict)
     augmentation: dict = field(default_factory=dict)
     mixup: dict = field(default_factory=dict)
 
@@ -113,6 +114,14 @@ class Config:
 
     # ------------------------------------------------------------- evaluation
     @property
+    def tumor_type_enabled(self) -> bool:
+        return bool(self.tumor_type.get("enabled", False))
+
+    @property
+    def tumor_type_loss_weight(self) -> float:
+        return float(self.tumor_type.get("loss_weight", 0.2))
+
+    @property
     def eval_plane(self) -> str:
         plane = str(self.eval.get("plane", "axial"))
         if plane not in (*PLANES, "both"):
@@ -147,6 +156,7 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
         expansion=copy.deepcopy(dict(raw.get("expansion", {}))),
         sampler=copy.deepcopy(dict(raw.get("sampler", {}))),
         eval=copy.deepcopy(dict(raw.get("eval", {}))),
+        tumor_type=copy.deepcopy(dict(raw.get("tumor_type", {}))),
         augmentation=copy.deepcopy(dict(raw.get("augmentation", {}))),
         mixup=copy.deepcopy(dict(raw.get("mixup", {}))),
         root=cfg_path.resolve().parent,

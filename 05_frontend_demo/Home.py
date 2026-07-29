@@ -52,18 +52,18 @@ st.markdown("""
     :root {
         --bg-deep: #030712;
         --bg-mid: #0B132B;
-        --surface: rgba(15, 23, 42, 0.60);
-        --surface-strong: rgba(15, 23, 42, 0.80);
-        --border-soft: rgba(255, 255, 255, 0.07);
+        --surface: #FFFFFF;
+        --surface-strong: #FFFFFF;
+        --border-soft: #E2E8F0;
         --border-accent: rgba(56, 189, 248, 0.25);
-        --accent: #38BDF8;
-        --accent-2: #00F2FE;
-        --accent-violet: #818CF8;
-        --success: #34D399;
-        --warning: #FBBF24;
-        --danger: #F87171;
-        --text-primary: #F3F4F6;
-        --text-muted: #94A3B8;
+        --accent: #0284C7;
+        --accent-2: #0891B2;
+        --accent-violet: #4F46E5;
+        --success: #059669;
+        --warning: #B45309;
+        --danger: #DC2626;
+        --text-primary: #0F172A;
+        --text-muted: #64748B;
     }
 
     /* ---------- BASE APP ---------- */
@@ -71,7 +71,7 @@ st.markdown("""
         background:
             radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.08), transparent 40%),
             radial-gradient(circle at 85% 85%, rgba(129, 140, 248, 0.08), transparent 40%),
-            linear-gradient(135deg, var(--bg-deep) 0%, var(--bg-mid) 50%, #060913 100%);
+            linear-gradient(135deg, var(--bg-deep) 0%, var(--bg-mid) 50%, #FFFFFF 100%);
         color: var(--text-primary);
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
@@ -132,7 +132,7 @@ st.markdown("""
     }
 
     .metric-card {
-        background: linear-gradient(145deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8));
+        background: linear-gradient(145deg, #F8FAFC, #FFFFFF);
         border: 1px solid rgba(56, 189, 248, 0.15);
         border-radius: 14px;
         padding: 20px;
@@ -148,11 +148,11 @@ st.markdown("""
     .metric-card.danger  { border-color: rgba(248, 113, 113, 0.3); }
 
     /* ---------- TYPOGRAPHY ---------- */
-    h1, h2, h3 { color: #FFFFFF; font-weight: 700; letter-spacing: -0.01em; }
+    h1, h2, h3 { color: #0F172A; font-weight: 700; letter-spacing: -0.01em; }
     p, span, label, div { color: var(--text-primary); }
 
     .gradient-title {
-        background: linear-gradient(135deg, #FFFFFF 30%, #38BDF8 70%, #00F2FE 100%);
+        background: linear-gradient(135deg, #FFFFFF 30%, #0284C7 70%, #0891B2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
@@ -192,7 +192,7 @@ st.markdown("""
     /* ---------- SIDEBAR ---------- */
     [data-testid="stSidebar"] {
         background-color: var(--bg-deep);
-        border-right: 1px solid rgba(255, 255, 255, 0.05);
+        border-right: 1px solid #E2E8F0;
     }
     [data-testid="stSidebar"] .stPageLink,
     [data-testid="stSidebarNav"] a {
@@ -205,14 +205,14 @@ st.markdown("""
     }
     section[data-testid="stSidebar"] h1,
     section[data-testid="stSidebar"] h2,
-    section[data-testid="stSidebar"] h3 { color: #FFFFFF; }
+    section[data-testid="stSidebar"] h3 { color: #0F172A; }
 
     .sidebar-brand {
         display: flex;
         align-items: center;
         gap: 10px;
         padding: 4px 4px 18px 4px;
-        border-bottom: 1px solid rgba(255,255,255,0.06);
+        border-bottom: 1px solid #E2E8F0;
         margin-bottom: 14px;
     }
     .sidebar-brand-icon {
@@ -223,8 +223,8 @@ st.markdown("""
     .sidebar-brand-sub { font-size: 0.7rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; letter-spacing: 0.03em; }
 
     .sidebar-status-box {
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px solid rgba(255,255,255,0.06);
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
         border-radius: 12px;
         padding: 12px 14px;
         margin-top: 18px;
@@ -239,7 +239,7 @@ st.markdown("""
     .stButton > button, .stDownloadButton > button {
         background: linear-gradient(135deg, #1e293b, #0f172a);
         border: 1px solid rgba(56, 189, 248, 0.3);
-        color: #F3F4F6;
+        color: #0F172A;
         border-radius: 10px;
         font-weight: 600;
         padding: 0.55em 1.4em;
@@ -260,7 +260,7 @@ st.markdown("""
     /* ---------- TABS ---------- */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
-        border-bottom: 1px solid rgba(255,255,255,0.06);
+        border-bottom: 1px solid #E2E8F0;
     }
     .stTabs [data-baseweb="tab"] {
         background: transparent;
@@ -349,7 +349,7 @@ with st.sidebar:
             <span class="sidebar-status-label">Compliance</span>
             <span class="sidebar-status-value" style="color: var(--accent-violet);">HIPAA · GDPR</span>
         </div>
-        <div class="sidebar-status-row" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.06); padding-top:8px;">
+        <div class="sidebar-status-row" style="margin-top:8px; border-top:1px solid #E2E8F0; padding-top:8px;">
             <span class="sidebar-status-label">Session</span>
             <span class="sidebar-status-value" style="color: var(--text-muted); font-weight:400;">{datetime.now().strftime("%Y-%m-%d %H:%M")}</span>
         </div>

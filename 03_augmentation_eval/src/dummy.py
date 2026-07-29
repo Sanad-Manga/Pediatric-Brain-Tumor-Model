@@ -20,7 +20,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .slices import write_subject_plane
+from .slices import build_index, write_index
+
+#: synthetic volume size: small enough to stay fast, but it reproduces the real
+#: axial/coronal asymmetry (24x24 vs 24x16, like 240x240 vs 240x155)
+DUMMY_VOLUME_SHAPE = (24, 24, 16)
 
 
 class DummySegNet2D(nn.Module):
@@ -61,7 +65,8 @@ def save_dummy_checkpoint(path: Path, model: nn.Module | None = None, **meta) ->
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     model = model if model is not None else DummySegNet2D()
-    torch.save({"model_state_dict": model.state_dict(), **meta}, path)
+    torch.save({"model_state_dict": model.state_dict(),
+                "architecture": "dummy", **meta}, path)
     return path
 
 
@@ -82,9 +87,9 @@ def make_dummy_cache(
     subjects,
     cfg,
     volume_shape=(24, 24, 16),
-    hospital_of=None,
     seed: int = 0,
     et_fraction: float = 0.6,
+    with_index: bool = True,
 ) -> Path:
     """Write a tiny cache in the real format, sliced from random volumes.
 
@@ -99,7 +104,7 @@ def make_dummy_cache(
     many subjects have an enhancing core, mirroring the held-out set where 34 of
     82 subjects have no ET.
     """
-    from .slices import extract_plane_slices
+    from .slices import extract_plane_slices, write_slice
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -109,9 +114,10 @@ def make_dummy_cache(
     for s, subject_id in enumerate(subjects):
         volumes = {}
         for m, mod in enumerate(modalities):
-            # Raw, un-normalised, per-modality scale -- like the real cache.
-            vol = rng.random(volume_shape).astype(np.float32) * (200.0 * (m + 1))
-            vol[vol < 20.0] = 0.0          # a background the brain mask can find
+            # Already z-scored per volume, like the real cache: brain voxels
+            # around mean 0 / std 1 with a per-modality offset, zero background.
+            vol = rng.normal(loc=0.1 * m, scale=1.0, size=volume_shape).astype(np.float32)
+            vol[rng.random(volume_shape) < 0.1] = 0.0   # background the mask can find
             volumes[mod] = vol
 
         seg = np.zeros(volume_shape, dtype=np.uint8)
@@ -134,22 +140,18 @@ def make_dummy_cache(
         if sub_rng.random() < et_fraction:
             seg[cx - 1:cx + 1, cy - 1:cy + 1, lo:hi] = 1
 
-        means, stds = [], []
-        for mod in modalities:
-            brain = volumes[mod][volumes[mod] != 0]
-            means.append(float(brain.mean()) if brain.size else 0.0)
-            stds.append(float(max(brain.std(), cfg.min_std)) if brain.size else cfg.min_std)
-
-        hospital = hospital_of(subject_id) if hospital_of else "hospitalA"
         for plane in cfg.planes:
             axis = cfg.plane_axis(plane)
-            write_subject_plane(
-                out_dir, subject_id, plane, hospital,
-                {m: extract_plane_slices(v, axis) for m, v in volumes.items()},
-                extract_plane_slices(seg, axis),
-                np.asarray(means, dtype=np.float32),
-                np.asarray(stds, dtype=np.float32),
+            # (N, C, H, W): channels in the cache's t1c, t1n, t2f, t2w order
+            stacked = np.stack(
+                [extract_plane_slices(volumes[m], axis) for m in modalities], axis=1
             )
+            seg_slices = extract_plane_slices(seg, axis)
+            for i in range(stacked.shape[0]):
+                write_slice(out_dir, subject_id, plane, i, stacked[i], seg_slices[i])
+
+    if with_index:
+        write_index(build_index(out_dir, planes=cfg.planes, progress_every=0), out_dir)
     return out_dir
 
 

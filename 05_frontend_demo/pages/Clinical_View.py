@@ -6,53 +6,53 @@ st.markdown("""
 <style>
 .page-hero {
     background: radial-gradient(circle at 20% 50%, rgba(56,189,248,0.09), transparent 50%),
-                linear-gradient(135deg,#0B1628,#0F172A);
+                linear-gradient(135deg,#F8FAFC,#E0F2FE);
     border:1px solid rgba(56,189,248,0.2); border-radius:20px; padding:40px 44px; margin-bottom:28px;
 }
 .page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em;
-    background:linear-gradient(135deg,#fff 40%,#38BDF8);
+    background:linear-gradient(135deg,#0F172A 30%,#0284C7);
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-bottom:8px; }
-.page-sub { color:#94A3B8; font-size:0.92rem; }
-.panel { background:rgba(15,23,42,0.55); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:28px; margin-bottom:20px; }
-.panel-title { font-size:1rem; font-weight:700; color:#F3F4F6; margin-bottom:18px; }
+.page-sub { color:#64748B; font-size:0.92rem; }
+.panel { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:16px; padding:28px; margin-bottom:20px; }
+.panel-title { font-size:1rem; font-weight:700; color:#0F172A; margin-bottom:18px; }
 .sub-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 .sub-card {
-    background:rgba(10,15,35,0.65); border-radius:14px; padding:20px;
+    background:#F8FAFC; border-radius:14px; padding:20px;
     transition: transform .2s ease, box-shadow .2s ease;
 }
 .sub-card:hover { transform:translateY(-2px); }
 .sub-card.et  { border-left:4px solid #EF4444; }
-.sub-card.ed  { border-left:4px solid #EAB308; }
-.sub-card.cc  { border-left:4px solid #3B82F6; }
-.sub-card.net { border-left:4px solid #10B981; }
+.sub-card.ed  { border-left:4px solid #A16207; }
+.sub-card.cc  { border-left:4px solid #2563EB; }
+.sub-card.net { border-left:4px solid #059669; }
 .sub-card:hover.et  { box-shadow:0 8px 24px rgba(239,68,68,0.12); }
 .sub-card:hover.ed  { box-shadow:0 8px 24px rgba(234,179,8,0.12); }
 .sub-card:hover.cc  { box-shadow:0 8px 24px rgba(59,130,246,0.12); }
 .sub-card:hover.net { box-shadow:0 8px 24px rgba(16,185,129,0.12); }
 .sub-num  { font-size:0.68rem; font-family:'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px; }
-.et .sub-num  { color:#EF4444; } .ed .sub-num  { color:#EAB308; }
-.cc .sub-num  { color:#3B82F6; } .net .sub-num { color:#10B981; }
-.sub-name { font-size:0.9rem; font-weight:700; color:#F3F4F6; margin-bottom:8px; }
-.sub-desc { font-size:0.8rem; color:#94A3B8; line-height:1.6; }
+.et .sub-num  { color:#EF4444; } .ed .sub-num  { color:#A16207; }
+.cc .sub-num  { color:#2563EB; } .net .sub-num { color:#059669; }
+.sub-name { font-size:0.9rem; font-weight:700; color:#0F172A; margin-bottom:8px; }
+.sub-desc { font-size:0.8rem; color:#64748B; line-height:1.6; }
 .sub-badge { display:inline-block; margin-top:10px; padding:3px 10px; border-radius:6px; font-size:0.7rem; font-family:monospace; font-weight:600; }
 .et  .sub-badge { background:rgba(239,68,68,0.12); color:#EF4444; }
-.ed  .sub-badge { background:rgba(234,179,8,0.12); color:#EAB308; }
-.cc  .sub-badge { background:rgba(59,130,246,0.12); color:#3B82F6; }
-.net .sub-badge { background:rgba(16,185,129,0.12); color:#10B981; }
+.ed  .sub-badge { background:rgba(234,179,8,0.12); color:#A16207; }
+.cc  .sub-badge { background:rgba(59,130,246,0.12); color:#2563EB; }
+.net .sub-badge { background:rgba(16,185,129,0.12); color:#059669; }
 .xai-row { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 .xai-card {
-    background:rgba(10,15,35,0.65); border:1px solid rgba(255,255,255,0.06);
+    background:#F8FAFC; border:1px solid #E2E8F0;
     border-radius:14px; padding:20px; text-align:center;
     transition: border-color .2s ease, transform .2s ease;
 }
 .xai-card:hover { border-color:rgba(56,189,248,0.3); transform:translateY(-2px); }
 .xai-icon { font-size:1.8rem; margin-bottom:10px; }
-.xai-name { font-size:0.85rem; font-weight:700; color:#F3F4F6; margin-bottom:6px; }
+.xai-name { font-size:0.85rem; font-weight:700; color:#0F172A; margin-bottom:6px; }
 .xai-desc { font-size:0.75rem; color:#64748B; line-height:1.5; }
 .modality-table { width:100%; border-collapse:collapse; font-size:0.84rem; }
 .modality-table th { text-align:left; padding:10px 12px; font-size:0.72rem; text-transform:uppercase;
-    letter-spacing:0.06em; color:#64748B; border-bottom:1px solid rgba(255,255,255,0.07); }
-.modality-table td { padding:12px; border-bottom:1px solid rgba(255,255,255,0.05); color:#CBD5E1; }
+    letter-spacing:0.06em; color:#64748B; border-bottom:1px solid #E2E8F0; }
+.modality-table td { padding:12px; border-bottom:1px solid #E2E8F0; color:#334155; }
 .modality-table tr:last-child td { border-bottom:none; }
 .disclaimer { background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25);
     border-radius:12px; padding:16px 20px; font-size:0.83rem; color:#FCA5A5; line-height:1.6; }
@@ -121,10 +121,10 @@ st.markdown("""
             <tr><th>Modality</th><th>Key Visualization</th><th>Primary Subregion</th><th>Signal</th></tr>
         </thead>
         <tbody>
-            <tr><td><b style="color:#38BDF8;">T1</b></td><td>Anatomical baseline, CSF dark</td><td>Non-Enhancing Tumor (NET)</td><td>Gray matter / White matter contrast</td></tr>
-            <tr><td><b style="color:#818CF8;">T1c</b></td><td>Contrast-enhancing lesion</td><td>Enhancing Tumor (ET)</td><td>Bright on active regions</td></tr>
-            <tr><td><b style="color:#34D399;">T2</b></td><td>Fluid & edema bright</td><td>Cystic Component (CC)</td><td>Hyperintense fluid</td></tr>
-            <tr><td><b style="color:#FBBF24;">FLAIR</b></td><td>CSF suppressed, edema bright</td><td>Peritumoral Edema (ED)</td><td>Perilesional high signal</td></tr>
+            <tr><td><b style="color:#0284C7;">T1</b></td><td>Anatomical baseline, CSF dark</td><td>Non-Enhancing Tumor (NET)</td><td>Gray matter / White matter contrast</td></tr>
+            <tr><td><b style="color:#4F46E5;">T1c</b></td><td>Contrast-enhancing lesion</td><td>Enhancing Tumor (ET)</td><td>Bright on active regions</td></tr>
+            <tr><td><b style="color:#059669;">T2</b></td><td>Fluid & edema bright</td><td>Cystic Component (CC)</td><td>Hyperintense fluid</td></tr>
+            <tr><td><b style="color:#B45309;">FLAIR</b></td><td>CSF suppressed, edema bright</td><td>Peritumoral Edema (ED)</td><td>Perilesional high signal</td></tr>
         </tbody>
     </table>
 </div>

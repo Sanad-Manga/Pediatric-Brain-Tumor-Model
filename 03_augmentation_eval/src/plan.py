@@ -122,14 +122,10 @@ def build_hospital_plan(hospital: str, subject_ids, cache_index, cfg: Config) ->
         et, tumor, empty = [], [], []
         for plane in sorted(cache_index[sid]):
             summary = cache_index[sid][plane]
-            has_tumor = np.asarray(summary["has_tumor"], dtype=bool)
-            has_et = np.asarray(summary["has_et"], dtype=bool)
-            for i in np.nonzero(has_et)[0]:
-                et.append((plane, int(i)))
-            for i in np.nonzero(has_tumor & ~has_et)[0]:
-                tumor.append((plane, int(i)))
-            for i in np.nonzero(~has_tumor)[0]:
-                empty.append((plane, int(i)))
+            et_set = set(summary["et"])
+            et.extend((plane, i) for i in summary["et"])
+            tumor.extend((plane, i) for i in summary["tumor"] if i not in et_set)
+            empty.extend((plane, i) for i in summary["empty"])
         # pop() takes from the end, so shuffle then reverse-consume
         et_pool[sid] = [et[k] for k in rng.permutation(len(et))]
         tumor_pool[sid] = [tumor[k] for k in rng.permutation(len(tumor))]
@@ -345,23 +341,22 @@ def build_hospital_plan(hospital: str, subject_ids, cache_index, cfg: Config) ->
 
 
 def _mask_set(cache_index, subject_id, key) -> set:
-    """``{(plane, slice_index)}`` where the named boolean mask is true."""
-    out = set()
-    for plane, summary in cache_index.get(subject_id, {}).items():
-        mask = np.asarray(summary[key], dtype=bool)
-        for i in np.nonzero(mask)[0]:
-            out.add((plane, int(i)))
-    return out
+    """``{(plane, slice_index)}`` for one of the index's slice-index lists."""
+    return {
+        (plane, int(i))
+        for plane, summary in cache_index.get(subject_id, {}).items()
+        for i in summary[key]
+    }
 
 
 def _tumor_set(cache_index, subject_id) -> set:
     """``{(plane, slice_index)}`` of tumour-bearing slices for one subject."""
-    return _mask_set(cache_index, subject_id, "has_tumor")
+    return _mask_set(cache_index, subject_id, "tumor")
 
 
 def _et_set(cache_index, subject_id) -> set:
     """``{(plane, slice_index)}`` of enhancing-tumour slices for one subject."""
-    return _mask_set(cache_index, subject_id, "has_et")
+    return _mask_set(cache_index, subject_id, "et")
 
 
 def build_plans(cfg: Config, cache_dir: Path | None = None) -> dict[str, dict]:

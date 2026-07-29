@@ -15,17 +15,22 @@ use_domain_adaptation: false  # recorded in the results CSV; implemented in 02_d
 
 # ---------------------------------------------------------------- paths
 paths:
-  # Raw BraTS-PEDs NIfTI root, read only by `run.py slices`. One folder per
-  # subject containing <subject>-t1c.nii.gz etc. Lives on Ahmed's laptop.
-  nifti_root: "D:/Medical AI Workshop/BraTS-PEDs/train"
-  # The 2D slice cache produced by `run.py slices` and read by everything else.
-  cache_2d: "D:/Medical AI Workshop/cache_2d"
+  # The 2D slice cache. Produced from the original volumes by the team; this
+  # section consumes it. Layout: <cache_2d>/<subject>/<plane>/slice_NNN.npz
+  # with keys `image` (4, H, W) float32 -- already z-scored per volume, channels
+  # in the order t1c, t1n, t2f, t2w -- and `mask` (1, H, W) uint8, labels 0-4.
+  cache_2d: "/content/drive/MyDrive/Medical AI Workshop/pack_out/pack_out"
   manifests: "../00_shared/manifests"
   plans_dir: "plans"
   results_csv: "results/ablation_results.csv"
 
 # ---------------------------------------------------------------- data
 data:
+  lr_axis: 0                # array axis running left-right (midline-ness)
+  is_axis: 2                # array axis running inferior-superior (brainstem is low)
+  # Channel order inside `image` -- confirmed with the team. Not separate
+  # arrays: the cache stores the four modalities already stacked, which is
+  # exactly what the model consumes.
   modalities: ["t1c", "t1n", "t2f", "t2w"]
   planes: ["axial", "coronal"]      # sagittal is deliberately absent
   # Source volumes are 240 x 240 x 155 @ 1mm isotropic. Axial slices are
@@ -39,7 +44,8 @@ data:
   resize_mode: "pad"                # pad only -- resizing would distort aspect
   num_classes: 5                    # background + labels 1..4
   valid_labels: [0, 1, 2, 3, 4]
-  min_std: 1.0e-6                   # z-score denominator clamp
+  # No normalisation knobs: the cache is already z-scored per volume over brain
+  # voxels (verified -- slice statistics drift rather than being pinned to 0/1).
 
 # ---------------------------------------------------------------- expansion
 # The 3D rule was "150 subjects per hospital". In 2D it becomes a slice budget
@@ -63,6 +69,19 @@ expansion:
 sampler:
   max_slices_per_patient_per_batch: 1
   plane_homogeneous_batches: true
+
+# --------------------------------------------------------- tumour-type proxy
+# NOTE: no tumor-type ground truth exists in the manifests or the cache. These
+# thresholds define an IMAGING PROXY derived from segmentation mask geometry
+# (ported from the 3D version's strata.py). It is NOT histology.
+# Used as an AUXILIARY CLASSIFICATION HEAD (model.py TumorTypeHead), reading
+# the model's bottleneck features -- not as a data-balancing signal, and not
+# part of the shared model(x) -> (seg_logits, features) interface.
+tumor_type:
+  enabled: true
+  loss_weight: 0.2       # lambda: total_loss = dice_ce + loss_weight * type_ce
+  lr_axis: 0
+  is_axis: 2
 
 # ---------------------------------------------------------------- evaluation
 eval:

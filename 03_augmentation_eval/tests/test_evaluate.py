@@ -30,6 +30,43 @@ def test_restacking_rebuilds_the_volume_frame_from_either_plane(cfg):
         assert np.array_equal(restack_volume(slices, plane, cfg), volume)
 
 
+def test_restacking_places_slices_at_their_true_index(cfg):
+    """Real subjects have blank edge slices dropped: indices run e.g. 8..134.
+
+    Stacking those densely would shorten the volume and shift every slice, and
+    would give axial and coronal different shapes so `both` could not average
+    them. This is the case that silently corrupts per-patient Dice.
+    """
+    vs = cfg.volume_shape
+    axis = cfg.plane_axis("axial")
+    n_full = vs[axis]
+
+    full = np.random.default_rng(7).integers(0, 5, vs).astype(np.int64)
+    kept = list(range(3, n_full - 2))                      # blank edges dropped
+    slices = np.moveaxis(full, axis, 0)[kept]
+
+    out = restack_volume(slices, "axial", cfg, indices=kept)
+    assert out.shape == tuple(vs)                          # full size, not len(kept)
+    assert np.array_equal(np.moveaxis(out, axis, 0)[kept], slices)
+    dropped = [i for i in range(n_full) if i not in kept]
+    assert not np.moveaxis(out, axis, 0)[dropped].any()    # missing stay background
+
+
+def test_trimmed_planes_restack_to_a_common_shape(cfg):
+    """Axial and coronal trimmed differently must still be averageable."""
+    vs = cfg.volume_shape
+    volumes = {}
+    for plane in ("axial", "coronal"):
+        axis = cfg.plane_axis(plane)
+        kept = list(range(2, vs[axis] - 3))
+        arr = np.zeros((5, len(kept), *[s for i, s in enumerate(vs) if i != axis]),
+                       dtype=np.float32)
+        volumes[plane] = restack_volume(arr, plane, cfg, channelled=True, indices=kept)
+
+    assert volumes["axial"].shape == volumes["coronal"].shape == (5, *vs)
+    assert (volumes["axial"] + volumes["coronal"]).shape == (5, *vs)
+
+
 def test_restacking_handles_the_channel_axis(cfg):
     rng = np.random.default_rng(1)
     probs = rng.random((5, 16, 24, 24)).astype(np.float32)   # (C, N, H, W) axial

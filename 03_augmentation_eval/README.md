@@ -3,6 +3,9 @@
 One entry point: `python run.py <command>`. Anything not reachable through it is
 not part of this section.
 
+The dataset is **2D slices**, produced from the original volumes by the team.
+This section consumes them; it does not create them.
+
 ---
 
 ## Run these, in this order
@@ -31,33 +34,39 @@ wrote: nothing (test run only; suite at .../03_augmentation_eval/tests)
 This is the command to run first on a clean checkout. If it passes, the
 pipeline is sound; only real data is missing.
 
-### 2. Export 2D slices from the volumes
+### 2. Index the slice cache (once)
 
 ```bash
-python run.py slices --out cache_2d
+python run.py index
 ```
 
-**Prerequisite:** the raw BraTS-PEDs NIfTI dataset, which lives on Ahmed's
-laptop only. Point `paths.nifti_root` in `config.yaml` at it first.
-
-Expected, with the data present:
-
-```
-planes exported: axial, coronal (sagittal dropped)
-subjects written: 227 of 227
-files written: 454
-wrote: D:\Medical AI Workshop\cache_2d
-```
-
-Expected, without it — the command refuses rather than writing a partial cache:
+**Prerequisite:** the 2D slice cache. The team produces it from the original
+volumes — this section consumes it, it does not create it. Point
+`paths.cache_2d` in `config.yaml` at it.
 
 ```
-error: raw NIfTI dataset not found: D:\Medical AI Workshop\BraTS-PEDs\train
-  set paths.nifti_root in config.yaml to the BraTS-PEDs folder
+<cache_2d>/<subject_id>/<plane>/slice_<NNN>.npz     plane ∈ {axial, coronal}
+  image : (4, H, W) float32  — t1c, t1n, t2f, t2w, already z-scored per volume
+  mask  : (1, H, W) uint8    — labels 0–4
 ```
 
-Useful flags: `--limit 5` (first N subjects), `--manifest hospitalA`,
-`--planes axial`.
+Expected:
+
+```
+planes indexed: axial, coronal (sagittal not used)
+subjects: 23    slice files scanned: 8770
+slices with tumour: 2763 (31.5%)    with ET: 14.4%
+wrote: .../Processed_2D/index.json
+```
+
+**Why this step exists.** The cache stores `image` and `mask` only, but `plan`
+needs to know which slices contain tumour *before* it selects any. Deriving that
+means opening every mask — ~90,000 files for the full cohort — so it is done
+once here and written to `index.json` (a few hundred KB).
+
+Re-run it whenever subjects are added to the cache.
+
+Useful flags: `--limit 5`, `--cache <dir>`, `--planes axial`.
 
 ### 3. Build the per-hospital balanced slice plan
 
@@ -154,10 +163,18 @@ zero-padding. Stretching coronal slices to square would distort aspect and
 change tumour morphology. Padding is also exactly invertible, which is what lets
 predictions be cropped back to native shape and restacked.
 
-**Normalisation is per volume, not per slice.** Z-score over non-zero (brain)
-voxels, computed once per volume at export time and stored in the cache as
-`norm_mean` / `norm_std`. Per-slice normalisation would change what an intensity
-means from slice to slice.
+**Normalisation is already applied, per volume.** The cache arrives z-scored
+over non-zero (brain) voxels, computed per volume — verified by checking that
+brain statistics drift across a subject's slices (mean +0.19 → −0.05) rather
+than being pinned to 0/1, which is what per-slice normalisation would produce.
+Nothing here re-normalises. `run.py index` re-checks this and warns if a future
+cache looks per-slice normalised.
+
+**Slice indices are volume positions, not counters.** Subjects whose blank edge
+slices were dropped run e.g. `slice_008..slice_134`, not `000..126`. Everything
+uses the number in the filename, so a restacked prediction lands at the right
+depth. Getting this wrong shifts every slice and silently corrupts per-patient
+Dice — `tests/test_evaluate.py` pins it.
 
 **Dice is scored per patient, not per slice.** Every slice of a subject is
 predicted, un-padded, stacked back into a 240×240×155 volume, and scored once.
@@ -237,12 +254,12 @@ rather than a silent misaligned append.
 ## Layout
 
 ```
-run.py                  the entry point: test | slices | plan | preview | eval
+run.py                  the entry point: test | index | plan | preview | eval
 config.yaml             every knob; ablation flags at the top
-SPEC.md                 what was built, as 53 testable requirements
+SPEC.md                 what was built, as testable requirements
 src/
   config.py             YAML -> Config; the mixup gating rule
-  slices.py             NIfTI -> 2D cache; volume-level norm stats; pad/unpad
+  slices.py             cache layout, the tumour/ET index, pad/unpad
   augment.py            MONAI 2D stack + segmentation mixup
   plan.py               per-hospital balanced slice plan + provenance
   dataset.py            SliceDataset, EvalSubjectDataset, batch sampler
