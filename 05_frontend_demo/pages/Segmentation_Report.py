@@ -14,6 +14,7 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
+from components.theme import apply_custom_theme
 from utils import loaders
 from utils.inference import (
     DEFAULT_CHECKPOINT,
@@ -25,65 +26,51 @@ from utils.inference import (
 
 st.set_page_config(page_title="Segmentation Report | NeuroFed AI", page_icon="📋", layout="wide")
 
+# Shared light theme first; the rules below only add layout this page needs.
+apply_custom_theme()
+
 st.markdown("""
 <style>
-.page-hero {
-    background: radial-gradient(circle at 20% 50%, rgba(56,189,248,0.09), transparent 50%),
-                linear-gradient(135deg,#0B1628,#0F172A);
-    border:1px solid rgba(56,189,248,0.2); border-radius:20px; padding:40px 44px; margin-bottom:28px;
-}
-.page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em;
-    background:linear-gradient(135deg,#fff 40%,#38BDF8);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-bottom:8px; }
-.page-sub { color:#94A3B8; font-size:0.92rem; }
+.page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em; margin-bottom:8px; }
+.page-sub { font-size:0.92rem; }
 
-.panel { background:rgba(15,23,42,0.55); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:26px; margin-bottom:18px; }
-.panel-title { font-size:0.95rem; font-weight:700; color:#F3F4F6; margin-bottom:18px; display:flex; align-items:center; gap:8px; }
+.panel-title { font-size:0.95rem; font-weight:700; margin-bottom:18px; display:flex; align-items:center; gap:8px; }
 
 .meta-table { width:100%; border-collapse:collapse; font-size:0.84rem; }
-.meta-table tr { border-bottom:1px solid rgba(255,255,255,0.05); }
 .meta-table tr:last-child { border-bottom:none; }
 .meta-table td { padding:11px 8px; }
-.meta-key { color:#64748B; width:42%; font-size:0.78rem; font-family:'JetBrains Mono',monospace; }
-.meta-val { color:#CBD5E1; font-weight:500; }
+.meta-key { width:42%; font-size:0.78rem; font-family:'JetBrains Mono',monospace; }
+.meta-val { font-weight:500; }
 
-.interp-box {
-    background:rgba(5,10,31,0.75); border-left:3px solid #38BDF8; border-radius:0 10px 10px 0;
-    padding:16px 20px; color:#CBD5E1; font-size:0.87rem; line-height:1.85;
-}
-.caveat-box {
-    background:rgba(60,30,10,0.35); border-left:3px solid #F59E0B; border-radius:0 10px 10px 0;
-    padding:14px 18px; color:#FCD9A0; font-size:0.8rem; line-height:1.7; margin-top:14px;
-}
+.interp-box { font-size:0.87rem; line-height:1.85; }
+.caveat-box { font-size:0.8rem; line-height:1.7; margin-top:14px; }
 
 .seg-row { margin-bottom:14px; }
 .seg-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
-.seg-label { display:flex; align-items:center; gap:8px; font-size:0.8rem; color:#94A3B8; }
+.seg-label { display:flex; align-items:center; gap:8px; font-size:0.8rem; color:#475569; }
 .seg-dot   { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
 .seg-pct   { font-size:0.8rem; font-family:'JetBrains Mono',monospace; font-weight:600; }
-.seg-bar-bg  { height:6px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; }
+.seg-bar-bg  { height:6px; border-radius:4px; overflow:hidden; }
 .seg-bar     { height:100%; border-radius:4px; }
 
 .conf-inner {
-    width:82px; height:82px; border-radius:50%; background:#0B1628;
+    width:82px; height:82px; border-radius:50%;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
 }
-.conf-num   { font-size:1.3rem; font-weight:800; color:#34D399; letter-spacing:-0.02em; line-height:1; }
-.conf-label { font-size:0.6rem; color:#64748B; text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
+.conf-num   { font-size:1.3rem; font-weight:800; letter-spacing:-0.02em; line-height:1; }
+.conf-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
 
 .status-bar {
     display:flex; justify-content:space-between; align-items:center;
-    background:rgba(5,10,31,0.7); border:1px solid rgba(56,189,248,0.12);
     border-radius:10px; padding:10px 16px; margin-top:6px;
     font-size:0.72rem; font-family:'JetBrains Mono',monospace;
 }
-.status-left  { color:#38BDF8; display:flex; align-items:center; gap:8px; }
-.status-right { color:#64748B; }
-.live-dot { width:6px; height:6px; border-radius:50%; background:#34D399; animation:pulseDot 1.8s infinite; }
+.status-left  { display:flex; align-items:center; gap:8px; }
+.live-dot { width:6px; height:6px; border-radius:50%; background:#059669; animation:pulseDot 1.8s infinite; }
 @keyframes pulseDot {
-    0%  { box-shadow:0 0 0 0 rgba(52,211,153,.6); }
-    70% { box-shadow:0 0 0 6px rgba(52,211,153,0); }
-    100%{ box-shadow:0 0 0 0 rgba(52,211,153,0); }
+    0%  { box-shadow:0 0 0 0 rgba(5,150,105,.5); }
+    70% { box-shadow:0 0 0 6px rgba(5,150,105,0); }
+    100%{ box-shadow:0 0 0 0 rgba(5,150,105,0); }
 }
 </style>
 

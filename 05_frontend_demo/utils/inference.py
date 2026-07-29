@@ -140,7 +140,10 @@ def predict_slice(model, cfg, cache_dir, subject_id: str, plane: str,
     pred = unpad(pred, pad)
     truth = unpad(label[0], pad)
     image_native = np.stack([unpad(c, pad) for c in image])
-    confidence = float(probs_np.max(axis=0).mean())
+    # Per-class probabilities, unpadded like everything else -- ROC/AUC needs
+    # the continuous scores, not just the argmax.
+    probs_native = np.stack([unpad(c, pad) for c in probs_np])
+    confidence = float(probs_native.max(axis=0).mean())
 
     out = {
         "subject_id": subject_id,
@@ -149,6 +152,7 @@ def predict_slice(model, cfg, cache_dir, subject_id: str, plane: str,
         "image": image_native,       # (4, H, W) the four modalities
         "prediction": pred,          # (H, W) labels 0-4
         "ground_truth": truth,       # (H, W) labels 0-4
+        "probabilities": probs_native,  # (5, H, W) softmax over classes
         "confidence": confidence,
         "features": features[0].cpu().numpy(),
     }

@@ -110,7 +110,10 @@ def load_training_history(checkpoint_path=DEFAULT_CHECKPOINT) -> list[dict]:
     if not history_path.exists():
         return []
     with open(history_path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        blob = json.load(fh)
+    # train.py writes a summary object wrapping the per-epoch records; older
+    # files (and hand-made ones) may be the bare list.
+    return blob.get("history", []) if isinstance(blob, dict) else blob
 
 
 def load_ablation_results(results_csv: str | Path | None = None) -> list[dict]:

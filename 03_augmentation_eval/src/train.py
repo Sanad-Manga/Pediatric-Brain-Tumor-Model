@@ -218,7 +218,36 @@ def run(
         best = float(payload.get("best_mean_dice", -1.0))
         LOGGER.info("resumed from %s at epoch %d", last_path, start_epoch)
 
+    # Carry forward any history from a previous run of this run_id, so resuming
+    # after a disconnect doesn't silently truncate the curve to post-resume
+    # epochs only.
+    history_path = ckpt_dir / "history.json"
     history = []
+    if resume and history_path.exists():
+        try:
+            with open(history_path, "r", encoding="utf-8") as fh:
+                history = [r for r in json.load(fh).get("history", [])
+                           if int(r.get("epoch", -1)) < start_epoch]
+        except (json.JSONDecodeError, OSError):
+            LOGGER.warning("could not read %s; starting a fresh history", history_path)
+
+    def write_history(done: bool) -> None:
+        """Persist the curve after every epoch.
+
+        Writing only at the end loses the entire history when a run is stopped
+        early -- which is the normal case on a preemptible GPU or a Colab
+        session, not an edge case.
+        """
+        payload = {"run_id": run_id, "epochs": epochs,
+                   "epochs_completed": len(history), "completed": done,
+                   "best_mean_dice": round(best, 4), "val_subjects": val_subjects,
+                   "train_entries": len(train_entries), "history": history,
+                   "checkpoint_dir": str(ckpt_dir)}
+        tmp = history_path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        tmp.replace(history_path)   # atomic: never leave a half-written curve
+
     for epoch in range(start_epoch, epochs):
         model.train()
         if type_head is not None:
@@ -280,10 +309,8 @@ def run(
         if mean_dice > best:
             best = mean_dice
             save_checkpoint(ckpt_dir / "best.pt", model, optimizer, epoch, best, cfg, type_head)
+        write_history(done=False)
 
-    summary = {"run_id": run_id, "epochs": epochs, "best_mean_dice": round(best, 4),
-               "val_subjects": val_subjects, "train_entries": len(train_entries),
-               "history": history, "checkpoint_dir": str(ckpt_dir)}
-    with open(ckpt_dir / "history.json", "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, indent=2)
-    return summary
+    write_history(done=True)
+    with open(history_path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
