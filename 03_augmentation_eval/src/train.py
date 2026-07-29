@@ -34,7 +34,7 @@ from .evaluate import evaluate_subject
 from .metrics import REGION_ORDER, aggregate
 from .model import TumorTypeHead, build_model
 from .plan import build_plans
-from .tumor_type import build_type_index, label_index
+from .tumor_type import build_type_index, label_index, read_type_index, write_type_index
 
 LOGGER = logging.getLogger(__name__)
 
@@ -74,9 +74,20 @@ def build_type_lookup(cfg: Config, cache_dir, subjects, plane: str = "axial") ->
 
     Computed once, from the geometric proxy in `tumor_type.py` -- reconstructing
     each subject's mask volume from its axial slices, which has been verified
-    exact against the real cache.
+    exact against the real cache. Cached to ``<cache_dir>/tumor_type.json`` so
+    resuming or restarting training (e.g. after a Colab disconnect) doesn't
+    re-read every subject's slices again -- that reconstruction is slow over a
+    mounted Drive filesystem.
     """
+    try:
+        index = read_type_index(cache_dir)
+        if set(index["subjects"]) >= set(subjects):
+            return {sid: label_index(v["stratum"]) for sid, v in index["subjects"].items()
+                    if sid in subjects}
+    except FileNotFoundError:
+        pass
     index = build_type_index(cache_dir, subjects, cfg, plane=plane, progress_every=0)
+    write_type_index(index, cache_dir)
     return {sid: label_index(v["stratum"]) for sid, v in index["subjects"].items()}
 
 
