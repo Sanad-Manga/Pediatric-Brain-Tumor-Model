@@ -41,6 +41,9 @@ class Config:
     sampler: dict = field(default_factory=dict)
     eval: dict = field(default_factory=dict)
     tumor_type: dict = field(default_factory=dict)
+    loss: dict = field(default_factory=dict)
+    schedule: dict = field(default_factory=dict)
+    selection: dict = field(default_factory=dict)
     augmentation: dict = field(default_factory=dict)
     mixup: dict = field(default_factory=dict)
 
@@ -122,6 +125,35 @@ class Config:
         return float(self.tumor_type.get("loss_weight", 0.2))
 
     @property
+    def class_weights(self):
+        """Cross-entropy class weights, or None for uniform.
+
+        Uniform is what every run before these were introduced used, so leaving
+        the key out reproduces the older behaviour exactly.
+        """
+        w = self.loss.get("class_weights")
+        return list(w) if w else None
+
+    @property
+    def lr_schedule(self) -> str:
+        return str(self.schedule.get("kind", "none")).lower()
+
+    @property
+    def min_lr(self) -> float:
+        return float(self.schedule.get("min_lr", 0.0))
+
+    @property
+    def selection_metric(self) -> str:
+        """Which validation number promotes a checkpoint to ``best.pt``.
+
+        ``mean`` averages the three regions and is how epoch 25 displaced a
+        checkpoint that was far better at enhancing tumour. ``min_region``
+        scores the worst region, so one strong region cannot mask a collapse
+        in another.
+        """
+        return str(self.selection.get("metric", "mean")).lower()
+
+    @property
     def eval_plane(self) -> str:
         plane = str(self.eval.get("plane", "axial"))
         if plane not in (*PLANES, "both"):
@@ -157,6 +189,9 @@ def load_config(path: str | Path | None = None, **overrides: Any) -> Config:
         sampler=copy.deepcopy(dict(raw.get("sampler", {}))),
         eval=copy.deepcopy(dict(raw.get("eval", {}))),
         tumor_type=copy.deepcopy(dict(raw.get("tumor_type", {}))),
+        loss=copy.deepcopy(dict(raw.get("loss", {}))),
+        schedule=copy.deepcopy(dict(raw.get("schedule", {}))),
+        selection=copy.deepcopy(dict(raw.get("selection", {}))),
         augmentation=copy.deepcopy(dict(raw.get("augmentation", {}))),
         mixup=copy.deepcopy(dict(raw.get("mixup", {}))),
         root=cfg_path.resolve().parent,

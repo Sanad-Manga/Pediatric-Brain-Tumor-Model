@@ -186,7 +186,16 @@ def run(
     loader = DataLoader(train_ds, batch_sampler=sampler, collate_fn=collate, num_workers=0)
 
     model = build_model(cfg, spatial_dims=2).to(device)
-    loss_fn = DiceCELoss(to_onehot_y=True, softmax=True, include_background=False)
+    # Class-weighted CE. ET is the smallest and worst-scoring region, so a
+    # uniform loss lets the network trade it away for the easier bulk regions.
+    # Weights apply to the CE term only; the Dice term is already region-wise.
+    _w = cfg.class_weights
+    loss_fn = DiceCELoss(
+        to_onehot_y=True, softmax=True, include_background=False,
+        weight=torch.tensor(_w, dtype=torch.float32, device=device) if _w else None,
+    )
+    if _w:
+        LOGGER.info("class-weighted CE: %s", _w)
 
     # Tumour-type auxiliary head: reads `features` from the shared model
     # interface without changing model(x)'s signature. Trained against the
@@ -206,7 +215,15 @@ def run(
     params = list(model.parameters()) + (list(type_head.parameters()) if type_head else [])
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=1e-5)
 
-    start_epoch, best = 0, -1.0
+    # Fixed lr made validation Dice oscillate late in the run; decay it so the
+    # last epochs can settle instead of stepping over the minimum.
+    scheduler = None
+    if cfg.lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(epochs, 1), eta_min=cfg.min_lr)
+        LOGGER.info("cosine LR decay: %.1e -> %.1e over %d epochs", lr, cfg.min_lr, epochs)
+
+    start_epoch, best, best_mean = 0, -1.0, -1.0
     last_path = ckpt_dir / "last.pt"
     if resume and last_path.exists():
         payload = torch.load(last_path, map_location=device, weights_only=False)
@@ -217,6 +234,9 @@ def run(
         start_epoch = int(payload.get("epoch", 0)) + 1
         best = float(payload.get("best_mean_dice", -1.0))
         LOGGER.info("resumed from %s at epoch %d", last_path, start_epoch)
+        for _ in range(start_epoch):        # keep the LR curve aligned on resume
+            if scheduler is not None:
+                scheduler.step()
 
     # Carry forward any history from a previous run of this run_id, so resuming
     # after a disconnect doesn't silently truncate the curve to post-resume
@@ -305,10 +325,26 @@ def run(
             line += f"  type_acc={val['type_accuracy']:.3f}"
         print(line + f"  ({record['seconds']:.0f}s)")
 
-        save_checkpoint(last_path, model, optimizer, epoch, max(best, mean_dice), cfg, type_head)
-        if mean_dice > best:
-            best = mean_dice
+        # Two selection criteria, both recorded. `mean` can be carried by one
+        # strong region while another collapses -- that is exactly how a
+        # checkpoint 0.165 worse at ET was once promoted over a better one.
+        # `min_region` scores the weakest region and cannot be gamed that way.
+        min_region = min(val[f"dice_{r}"] for r in REGION_ORDER)
+        record["min_region_dice"] = round(min_region, 4)
+        score = min_region if cfg.selection_metric == "min_region" else mean_dice
+
+        save_checkpoint(last_path, model, optimizer, epoch, max(best, score), cfg, type_head)
+        if score > best:
+            best = score
             save_checkpoint(ckpt_dir / "best.pt", model, optimizer, epoch, best, cfg, type_head)
+            LOGGER.info("  new best by %s: %.4f (epoch %d)", cfg.selection_metric, best, epoch)
+        if mean_dice > best_mean:
+            best_mean = mean_dice
+            save_checkpoint(ckpt_dir / "best_mean.pt", model, optimizer, epoch, best_mean,
+                            cfg, type_head)
+        if scheduler is not None:
+            scheduler.step()
+            record["lr"] = round(optimizer.param_groups[0]["lr"], 8)
         write_history(done=False)
 
     write_history(done=True)

@@ -87,7 +87,27 @@ tumor_type:
 eval:
   # axial | coronal | both. `both` averages softmax probabilities in the shared
   # (C, 240, 240, 155) voxel grid before a single argmax.
-  plane: "axial"
+  plane: "both"
+
+# ---------------------------------------------------------------- loss / schedule
+loss:
+  # Cross-entropy class weights, index 0..4 (background, ET, NETC, CC, ED).
+  # Enhancing tumour is the weakest region and the smallest by volume, so it is
+  # up-weighted. null = uniform, which is what every run before this used.
+  class_weights: [0.2, 3.0, 1.0, 1.0, 1.0]
+
+schedule:
+  # Validation Dice oscillated late in training at a fixed 1e-3 -- the step size
+  # was too large to settle. Cosine decay to `min_lr` over the run.
+  kind: "cosine"          # cosine | none
+  min_lr: 1.0e-5
+
+selection:
+  # `mean` reproduces the old behaviour and is what picked epoch 25 over epoch
+  # 16 -- a checkpoint 0.165 worse at ET. `min_region` selects on the WORST
+  # region instead, which cannot be gamed by one region carrying the average.
+  # Both checkpoints are always written; this only decides which is `best.pt`.
+  metric: "min_region"    # mean | min_region
 
 # ---------------------------------------------------------------- MONAI augmentation
 augmentation:
