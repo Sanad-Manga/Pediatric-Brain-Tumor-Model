@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 import time
 
+from components.theme import apply_custom_theme
+from utils.loaders import cache_available, list_demo_subjects, load_metrics_cache
+
+apply_custom_theme()
+
 # ──────────────────────────────────────────────────────────
 #  PAGE-LEVEL CSS (inherits global theme from app.py)
 # ──────────────────────────────────────────────────────────
@@ -12,7 +17,7 @@ st.markdown("""
     background:
         radial-gradient(circle at 30% 50%, rgba(56,189,248,0.10), transparent 55%),
         radial-gradient(circle at 80% 20%, rgba(129,140,248,0.10), transparent 50%),
-        linear-gradient(135deg, #0B1628 0%, #0F172A 60%, #111827 100%);
+        linear-gradient(135deg,#FFFFFF 0%,#F8FAFC 60%,#EFF6FF 100%);
     border: 1px solid rgba(56,189,248,0.22);
     border-radius: 24px;
     padding: 48px 44px;
@@ -34,14 +39,14 @@ st.markdown("""
     border-radius: 99px;
     font-size: 0.72rem;
     font-family: 'JetBrains Mono', monospace;
-    color: #38BDF8;
+    color: #0284C7;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     margin-bottom: 18px;
 }
 .hero-live-dot {
     width: 7px; height: 7px; border-radius: 50%;
-    background: #34D399;
+    background: #059669;
     animation: pulseDot 1.8s infinite;
 }
 .hero-title {
@@ -49,14 +54,14 @@ st.markdown("""
     font-weight: 800;
     letter-spacing: -0.02em;
     line-height: 1.15;
-    background: linear-gradient(135deg, #FFFFFF 30%, #38BDF8 70%, #A5F3FC 100%);
+    background: linear-gradient(135deg,#0F172A 20%,#0284C7 70%,#0891B2 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 12px;
 }
 .hero-sub {
-    color: #94A3B8;
+    color: #64748B;
     font-size: 1rem;
     font-weight: 400;
     max-width: 600px;
@@ -71,10 +76,10 @@ st.markdown("""
     font-family: 'JetBrains Mono', monospace;
     font-weight: 500;
 }
-.hero-tag.cyan  { background: rgba(56,189,248,0.12); color: #38BDF8; border: 1px solid rgba(56,189,248,0.25); }
-.hero-tag.violet{ background: rgba(129,140,248,0.12); color: #818CF8; border: 1px solid rgba(129,140,248,0.25); }
-.hero-tag.green { background: rgba(52,211,153,0.12); color: #34D399; border: 1px solid rgba(52,211,153,0.25); }
-.hero-tag.amber { background: rgba(251,191,36,0.12); color: #FBBF24; border: 1px solid rgba(251,191,36,0.25); }
+.hero-tag.cyan  { background: rgba(56,189,248,0.12); color: #0284C7; border: 1px solid rgba(56,189,248,0.25); }
+.hero-tag.violet{ background: rgba(129,140,248,0.12); color: #4F46E5; border: 1px solid rgba(129,140,248,0.25); }
+.hero-tag.green { background: rgba(52,211,153,0.12); color: #059669; border: 1px solid rgba(52,211,153,0.25); }
+.hero-tag.amber { background: rgba(251,191,36,0.12); color: #B45309; border: 1px solid rgba(251,191,36,0.25); }
 .hero-corner-badge {
     position: absolute; top: 24px; right: 28px;
     font-size: 0.7rem; font-family: 'JetBrains Mono', monospace;
@@ -84,8 +89,8 @@ st.markdown("""
 /* ── STAT CARDS ── */
 .stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 32px; }
 .stat-card {
-    background: linear-gradient(145deg, rgba(30,41,59,0.65), rgba(15,23,42,0.80));
-    border: 1px solid rgba(255,255,255,0.07);
+    background: linear-gradient(145deg,#FFFFFF,#F8FAFC);
+    border: 1px solid #E2E8F0;
     border-radius: 16px;
     padding: 22px 20px;
     position: relative;
@@ -95,7 +100,7 @@ st.markdown("""
 }
 .stat-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+    box-shadow: 0 12px 32px rgba(15,23,42,0.08);
 }
 .stat-card.cyan:hover  { border-color: rgba(56,189,248,0.4); box-shadow: 0 12px 32px rgba(56,189,248,0.12); }
 .stat-card.violet:hover{ border-color: rgba(129,140,248,0.4); box-shadow: 0 12px 32px rgba(129,140,248,0.12); }
@@ -107,17 +112,17 @@ st.markdown("""
     border-radius: 0 16px 0 80px;
     opacity: 0.08;
 }
-.stat-card.cyan   .stat-card-accent { background: #38BDF8; }
-.stat-card.violet .stat-card-accent { background: #818CF8; }
-.stat-card.green  .stat-card-accent { background: #34D399; }
-.stat-card.amber  .stat-card-accent { background: #FBBF24; }
+.stat-card.cyan   .stat-card-accent { background: #0284C7; }
+.stat-card.violet .stat-card-accent { background: #4F46E5; }
+.stat-card.green  .stat-card-accent { background: #059669; }
+.stat-card.amber  .stat-card-accent { background: #B45309; }
 .stat-icon { font-size: 1.6rem; margin-bottom: 10px; }
 .stat-label { font-size: 0.73rem; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.06em; color: #64748B; margin-bottom: 6px; }
-.stat-value { font-size: 1.75rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: #F3F4F6; margin-bottom: 6px; }
+.stat-value { font-size: 1.75rem; font-weight: 800; line-height: 1; letter-spacing: -0.02em; color: #0F172A; margin-bottom: 6px; }
 .stat-delta { font-size: 0.75rem; font-weight: 500; font-family: 'JetBrains Mono', monospace; }
-.stat-delta.up   { color: #34D399; }
-.stat-delta.down { color: #F87171; }
-.stat-delta.info { color: #38BDF8; }
+.stat-delta.up   { color: #059669; }
+.stat-delta.down { color: #DC2626; }
+.stat-delta.info { color: #0284C7; }
 
 /* ── SECTION HEADINGS ── */
 .section-heading {
@@ -132,14 +137,14 @@ st.markdown("""
     display: flex; align-items: center; justify-content: center;
     font-size: 1rem;
 }
-.section-heading-text { font-size: 1.05rem; font-weight: 700; color: #F3F4F6; }
+.section-heading-text { font-size: 1.05rem; font-weight: 700; color: #0F172A; }
 .section-heading-sub  { font-size: 0.78rem; color: #64748B; margin-top: 1px; }
 
 /* ── MODULE CARDS ── */
 .mod-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 32px; }
 .mod-card {
-    background: rgba(15,23,42,0.55);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
     border-radius: 16px;
     padding: 24px;
     transition: transform 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
@@ -160,22 +165,22 @@ st.markdown("""
 .cyan   .mod-card-icon { background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); }
 .violet .mod-card-icon { background:rgba(129,140,248,0.12); border:1px solid rgba(129,140,248,0.25); }
 .green  .mod-card-icon { background:rgba(52,211,153,0.12);  border:1px solid rgba(52,211,153,0.25); }
-.mod-card-name { font-size:0.92rem; font-weight:700; color:#F3F4F6; }
+.mod-card-name { font-size:0.92rem; font-weight:700; color:#0F172A; }
 .mod-card-nav  { font-size:0.72rem; color:#64748B; margin-top:2px; }
-.mod-card-desc { font-size:0.82rem; color:#94A3B8; line-height:1.6; margin-bottom:14px; }
+.mod-card-desc { font-size:0.82rem; color:#64748B; line-height:1.6; margin-bottom:14px; }
 .mod-card-pills { display:flex; flex-wrap:wrap; gap:7px; }
 .pill {
     padding: 3px 10px; border-radius: 6px;
     font-size: 0.7rem; font-family:'JetBrains Mono',monospace; font-weight:500;
 }
-.pill.cyan   { background:rgba(56,189,248,0.10); color:#38BDF8; }
-.pill.violet { background:rgba(129,140,248,0.10); color:#818CF8; }
-.pill.green  { background:rgba(52,211,153,0.10); color:#34D399; }
+.pill.cyan   { background:rgba(56,189,248,0.10); color:#0284C7; }
+.pill.violet { background:rgba(129,140,248,0.10); color:#4F46E5; }
+.pill.green  { background:rgba(52,211,153,0.10); color:#059669; }
 
 /* ── PIPELINE ── */
 .pipeline-wrap {
-    background: rgba(15,23,42,0.55);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
     border-radius: 16px;
     padding: 28px 32px;
     margin-bottom: 32px;
@@ -197,15 +202,15 @@ st.markdown("""
 .pipeline-step-circle.c4 { background:rgba(251,191,36,0.12); border:2px solid rgba(251,191,36,0.35); }
 .pipeline-step-circle.c5 { background:rgba(248,113,113,0.12); border:2px solid rgba(248,113,113,0.35); }
 .pipeline-step-circle.c6 { background:rgba(56,189,248,0.12); border:2px solid rgba(56,189,248,0.35); }
-.pipeline-step-name { font-size:0.8rem; font-weight:600; color:#F3F4F6; margin-bottom:3px; }
+.pipeline-step-name { font-size:0.8rem; font-weight:600; color:#0F172A; margin-bottom:3px; }
 .pipeline-step-sub  { font-size:0.68rem; color:#64748B; font-family:'JetBrains Mono',monospace; }
 .pipeline-arrow { color:rgba(255,255,255,0.15); font-size:1.2rem; padding:0 4px; margin-bottom:32px; }
 
 /* ── PERF METRICS ── */
 .perf-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:32px; }
 .perf-card {
-    background:rgba(15,23,42,0.55);
-    border: 1px solid rgba(255,255,255,0.07);
+    background:#FFFFFF;
+    border: 1px solid #E2E8F0;
     border-radius:14px; padding:20px;
     text-align:center;
     transition: transform 0.22s ease;
@@ -213,27 +218,27 @@ st.markdown("""
 .perf-card:hover { transform:translateY(-2px); border-color:rgba(56,189,248,0.25); }
 .perf-num {
     font-size:2.1rem; font-weight:800; letter-spacing:-0.03em;
-    background:linear-gradient(135deg,#FFFFFF,#38BDF8);
+    background:linear-gradient(135deg,#FFFFFF,#0284C7);
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
     margin-bottom:4px;
 }
-.perf-name { font-size:0.78rem; font-weight:600; color:#94A3B8; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:10px; }
-.perf-bar-bg { height:4px; background:rgba(255,255,255,0.07); border-radius:4px; overflow:hidden; }
-.perf-bar-fill { height:100%; border-radius:4px; background:linear-gradient(90deg,#38BDF8,#00F2FE); }
+.perf-name { font-size:0.78rem; font-weight:600; color:#64748B; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:10px; }
+.perf-bar-bg { height:4px; background:#E2E8F0; border-radius:4px; overflow:hidden; }
+.perf-bar-fill { height:100%; border-radius:4px; background:linear-gradient(90deg,#0284C7,#0891B2); }
 
 /* ── DATA TABLE ── */
 .data-section { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:32px; }
 .data-panel {
-    background:rgba(15,23,42,0.55);
-    border:1px solid rgba(255,255,255,0.07);
+    background:#FFFFFF;
+    border:1px solid #E2E8F0;
     border-radius:16px; padding:24px;
 }
 
 /* ── RESEARCH HIGHLIGHTS ── */
 .research-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:32px; }
 .research-item {
-    background:rgba(15,23,42,0.55);
-    border:1px solid rgba(255,255,255,0.07);
+    background:#FFFFFF;
+    border:1px solid #E2E8F0;
     border-radius:12px;
     padding:16px 18px;
     display:flex; align-items:flex-start; gap:12px;
@@ -246,7 +251,7 @@ st.markdown("""
     display:flex; align-items:center; justify-content:center;
     font-size:0.8rem; flex-shrink:0; margin-top:1px;
 }
-.research-name  { font-size:0.85rem; font-weight:600; color:#F3F4F6; margin-bottom:3px; }
+.research-name  { font-size:0.85rem; font-weight:600; color:#0F172A; margin-bottom:3px; }
 .research-desc  { font-size:0.73rem; color:#64748B; line-height:1.45; }
 
 /* ── FOOTER ── */
@@ -256,7 +261,7 @@ st.markdown("""
     font-size:0.73rem;
     font-family:'JetBrains Mono',monospace;
     color:rgba(100,116,139,0.6);
-    border-top:1px solid rgba(255,255,255,0.05);
+    border-top:1px solid #E2E8F0;
     letter-spacing:0.03em;
 }
 
@@ -281,16 +286,16 @@ st.markdown("""
     </div>
     <div class="hero-title">Pediatric Brain Tumor<br>Intelligence Platform</div>
     <div class="hero-sub">
-        Federated deep learning across hospital networks — delivering 3D U-Net tumor segmentation,
+        Pediatric brain tumor segmentation on the BraTS-PEDs cohort — a 2D U-Net trained centrally,
         domain-adaptive AI, and publication-ready clinical outputs for pediatric oncology.
     </div>
     <div class="hero-tags">
         <span class="hero-tag cyan">⚡ Federated Learning</span>
-        <span class="hero-tag violet">🧠 3D U-Net · nnU-Net</span>
+        <span class="hero-tag violet">🧠 2D U-Net</span>
         <span class="hero-tag green">🔬 CORAL Adaptation</span>
         <span class="hero-tag amber">📊 Explainable AI</span>
         <span class="hero-tag cyan">🔒 HIPAA · GDPR</span>
-        <span class="hero-tag violet">⚙ FP16 Inference</span>
+        <span class="hero-tag violet">⚙ float32 inference</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -423,8 +428,8 @@ st.markdown("""
         <div class="pipeline-arrow">›</div>
         <div class="pipeline-step">
             <div class="pipeline-step-circle c3">🧠</div>
-            <div class="pipeline-step-name">3D U-Net</div>
-            <div class="pipeline-step-sub">96³ · FP16</div>
+            <div class="pipeline-step-name">2D U-Net</div>
+            <div class="pipeline-step-sub">240×240 · float32</div>
         </div>
         <div class="pipeline-arrow">›</div>
         <div class="pipeline-step">
@@ -456,33 +461,42 @@ st.markdown("""
     <div class="section-heading-icon">📈</div>
     <div>
         <div class="section-heading-text">Model Performance</div>
-        <div class="section-heading-sub">Validated on BraTS-PEDs held-out test set · 257 subjects</div>
-    </div>
-</div>
-
-<div class="perf-grid">
-    <div class="perf-card">
-        <div class="perf-num">96.2%</div>
-        <div class="perf-name">Dice Score</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:96.2%"></div></div>
-    </div>
-    <div class="perf-card">
-        <div class="perf-num">91.8%</div>
-        <div class="perf-name">IoU</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:91.8%"></div></div>
-    </div>
-    <div class="perf-card">
-        <div class="perf-num">95.4%</div>
-        <div class="perf-name">Sensitivity</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:95.4%"></div></div>
-    </div>
-    <div class="perf-card">
-        <div class="perf-num">97.9%</div>
-        <div class="perf-name">Specificity</div>
-        <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:97.9%"></div></div>
+        <div class="section-heading-sub">Whole tumour, measured on held-out patients</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# Measured, not illustrative. These four cards previously read 96.2% Dice /
+# 91.8% IoU / 95.4% sensitivity / 97.9% specificity, none of which came from a
+# trained model. IoU is derived from Dice exactly (IoU = D / (2 - D)).
+_roc = load_metrics_cache()
+if _roc is None or not _roc["regions"].get("WT"):
+    st.info("No measured metrics yet — run `python -m utils.build_metrics_cache` "
+            "to populate this section. No placeholder numbers are shown.")
+else:
+    _wt = _roc["regions"]["WT"]
+    _iou = _wt["dice"] / (2 - _wt["dice"])
+    _cards = [
+        (_wt["dice"] * 100, "Dice Score"),
+        (_iou * 100, "IoU"),
+        (_wt["sensitivity"] * 100, "Sensitivity"),
+        (_wt["specificity"] * 100, "Specificity"),
+    ]
+    st.markdown(
+        '<div class="perf-grid">'
+        + "".join(
+            f'<div class="perf-card"><div class="perf-num">{v:.1f}%</div>'
+            f'<div class="perf-name">{name}</div>'
+            f'<div class="perf-bar-bg"><div class="perf-bar-fill" style="width:{v:.1f}%"></div></div></div>'
+            for v, name in _cards
+        )
+        + "</div>", unsafe_allow_html=True)
+    st.caption(
+        f"Whole-tumour region, {_roc['n_subjects']} held-out patients, "
+        f"{_roc['n_slices']} tumour-bearing slices, "
+        f"{_roc['checkpoint']['epochs_completed']}-epoch checkpoint. "
+        "Enhancing tumour scores substantially lower — see Model Performance."
+    )
 
 # ──────────────────────────────────────────────────────────
 #  DATASET + RECENT CASES  (2-column)
@@ -506,49 +520,51 @@ with col_l:
                     text-transform:uppercase;letter-spacing:0.07em;
                     color:#64748B;margin-bottom:18px;">Dataset Summary</div>
         <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+            <tr style="border-bottom:1px solid #E2E8F0;">
                 <td style="padding:10px 0;color:#64748B;width:45%;">Dataset</td>
-                <td style="padding:10px 0;color:#F3F4F6;font-weight:600;">BraTS-PEDs 2024</td>
+                <td style="padding:10px 0;color:#0F172A;font-weight:600;">BraTS-PEDs 2024</td>
             </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+            <tr style="border-bottom:1px solid #E2E8F0;">
                 <td style="padding:10px 0;color:#64748B;">Subjects</td>
-                <td style="padding:10px 0;color:#38BDF8;font-weight:700;font-family:'JetBrains Mono',monospace;">257</td>
+                <td style="padding:10px 0;color:#0284C7;font-weight:700;font-family:'JetBrains Mono',monospace;">257</td>
             </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+            <tr style="border-bottom:1px solid #E2E8F0;">
                 <td style="padding:10px 0;color:#64748B;">Modalities</td>
-                <td style="padding:10px 0;color:#F3F4F6;font-family:'JetBrains Mono',monospace;">T1 · T1c · T2 · FLAIR</td>
+                <td style="padding:10px 0;color:#0F172A;font-family:'JetBrains Mono',monospace;">T1 · T1c · T2 · FLAIR</td>
             </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+            <tr style="border-bottom:1px solid #E2E8F0;">
                 <td style="padding:10px 0;color:#64748B;">Volume Shape</td>
-                <td style="padding:10px 0;color:#F3F4F6;font-family:'JetBrains Mono',monospace;">96 × 96 × 96</td>
+                <td style="padding:10px 0;color:#0F172A;font-family:'JetBrains Mono',monospace;">96 × 96 × 96</td>
             </tr>
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+            <tr style="border-bottom:1px solid #E2E8F0;">
                 <td style="padding:10px 0;color:#64748B;">Precision</td>
-                <td style="padding:10px 0;color:#FBBF24;font-weight:600;font-family:'JetBrains Mono',monospace;">FP16 Mixed</td>
+                <td style="padding:10px 0;color:#B45309;font-weight:600;font-family:'JetBrains Mono',monospace;">FP16 Mixed</td>
             </tr>
             <tr>
                 <td style="padding:10px 0;color:#64748B;">Task</td>
-                <td style="padding:10px 0;color:#F3F4F6;">Pediatric Tumor Seg.</td>
+                <td style="padding:10px 0;color:#0F172A;">Pediatric Tumor Seg.</td>
             </tr>
         </table>
     </div>
     """, unsafe_allow_html=True)
 
 with col_r:
-    cases_df = pd.DataFrame({
-        "Patient ID":   ["PED_0042", "PED_0017", "PED_0035", "PED_0008", "PED_0061"],
-        "Modality":     ["T1c · FLAIR", "T1 · T2", "T1c · T2", "FLAIR", "T1c · FLAIR"],
-        "Status":       ["✅ Completed", "✅ Completed", "✅ Validated", "✅ Completed", "⏳ Processing"],
-        "Confidence":   ["96.4%", "95.8%", "97.1%", "94.9%", "—"],
-    })
-    st.dataframe(
-        cases_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Confidence": st.column_config.TextColumn("Confidence"),
-        }
-    )
+    # Real subject ids from the cache. This table used to list invented patients
+    # (PED_0042 …) with invented per-case confidences; scoring each case here
+    # would mean running the model on every subject on page load, so it lists
+    # what is genuinely available and sends you to the report page to score one.
+    if not cache_available():
+        st.info("Slice cache not found — set `NEUROFED_CACHE_2D` to list available cases.")
+    else:
+        _subjects = list_demo_subjects(limit=5)
+        cases_df = pd.DataFrame({
+            "Subject ID": _subjects,
+            "Modalities": ["t1c · t1n · t2f · t2w"] * len(_subjects),
+            "Status": ["Cached · ready to segment"] * len(_subjects),
+        })
+        st.dataframe(cases_df, use_container_width=True, hide_index=True)
+        st.caption("Open **Segmentation Report** to run the model on any of these "
+                   "and see measured Dice for the slice.")
 
 # ──────────────────────────────────────────────────────────
 #  RESEARCH HIGHLIGHTS

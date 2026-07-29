@@ -8,15 +8,15 @@ st.markdown("""
 <style>
 .page-hero {
     background: radial-gradient(circle at 20% 50%, rgba(56,189,248,0.09), transparent 50%),
-                linear-gradient(135deg,#0B1628,#0F172A);
+                linear-gradient(135deg,#F8FAFC,#E0F2FE);
     border:1px solid rgba(56,189,248,0.2); border-radius:20px; padding:40px 44px; margin-bottom:28px;
 }
 .page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em;
-    background:linear-gradient(135deg,#fff 40%,#38BDF8);
+    background:linear-gradient(135deg,#0F172A 30%,#0284C7);
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-bottom:8px; }
-.page-sub { color:#94A3B8; font-size:0.92rem; }
-.panel { background:rgba(15,23,42,0.55); border:1px solid rgba(255,255,255,0.07); border-radius:16px; padding:24px; }
-.panel-title { font-size:0.9rem; font-weight:700; color:#F3F4F6; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.page-sub { color:#64748B; font-size:0.92rem; }
+.panel { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:16px; padding:24px; }
+.panel-title { font-size:0.9rem; font-weight:700; color:#0F172A; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
 .upload-zone {
     border:2px dashed rgba(56,189,248,0.25); border-radius:12px;
     padding:24px; text-align:center; margin-bottom:16px;
@@ -25,24 +25,24 @@ st.markdown("""
 }
 .upload-zone:hover { border-color:rgba(56,189,248,0.5); }
 .upload-hint { font-size:0.75rem; color:#64748B; margin-top:6px; }
-.divider-line { height:1px; background:rgba(255,255,255,0.07); margin:16px 0; }
+.divider-line { height:1px; background:#E2E8F0; margin:16px 0; }
 .subregion-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
 .subregion-left { display:flex; align-items:center; gap:10px; }
 .subregion-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-.subregion-name { font-size:0.8rem; color:#94A3B8; }
+.subregion-name { font-size:0.8rem; color:#64748B; }
 .subregion-pct  { font-size:0.8rem; font-family:'JetBrains Mono',monospace; font-weight:600; }
-.subregion-bar-bg { height:4px; border-radius:4px; background:rgba(255,255,255,0.06); overflow:hidden; margin-top:3px; }
+.subregion-bar-bg { height:4px; border-radius:4px; background:#E2E8F0; overflow:hidden; margin-top:3px; }
 .subregion-bar { height:100%; border-radius:4px; }
 .viewer-status {
     display:flex; justify-content:space-between; align-items:center;
-    background:rgba(5,10,31,0.7); border:1px solid rgba(56,189,248,0.15);
+    background:#F8FAFC; border:1px solid rgba(56,189,248,0.15);
     border-radius:10px; padding:10px 14px; margin-top:12px;
     font-size:0.75rem; font-family:'JetBrains Mono',monospace;
 }
-.status-left { color:#38BDF8; }
+.status-left { color:#0284C7; }
 .status-right { color:#64748B; }
 .status-dot { display:inline-block; width:6px; height:6px; border-radius:50%;
-    background:#34D399; margin-right:6px; animation:pulseDot 1.8s infinite; }
+    background:#059669; margin-right:6px; animation:pulseDot 1.8s infinite; }
 @keyframes pulseDot {
     0%  { box-shadow:0 0 0 0 rgba(52,211,153,.6); }
     70% { box-shadow:0 0 0 6px rgba(52,211,153,0); }
@@ -77,9 +77,9 @@ with col_ctrl:
 
     regions = [
         ("Enhancing Tumor (ET)", 24.2, "#EF4444"),
-        ("Peritumoral Edema (ED)", 48.6, "#EAB308"),
-        ("Cystic Component (CC)", 18.1, "#3B82F6"),
-        ("Non-enhancing (NET)", 9.1, "#10B981"),
+        ("Peritumoral Edema (ED)", 48.6, "#A16207"),
+        ("Cystic Component (CC)", 18.1, "#2563EB"),
+        ("Non-enhancing (NET)", 9.1, "#059669"),
     ]
     for name, pct, color in regions:
         st.markdown(f"""

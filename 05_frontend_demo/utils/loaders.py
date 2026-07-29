@@ -116,6 +116,20 @@ def load_training_history(checkpoint_path=DEFAULT_CHECKPOINT) -> list[dict]:
     return blob.get("history", []) if isinstance(blob, dict) else blob
 
 
+def load_metrics_cache(path: str | Path | None = None) -> dict | None:
+    """Measured ROC / Dice / sensitivity / specificity / HD95, or None.
+
+    Returns None rather than raising so a page can render an explicit "not
+    computed yet" state. Build the cache with:
+        python -m utils.build_metrics_cache
+    """
+    p = Path(path) if path else (Path(__file__).resolve().parent.parent / "data" / "roc_cache.json")
+    if not p.exists():
+        return None
+    with open(p, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
 def load_ablation_results(results_csv: str | Path | None = None) -> list[dict]:
     """Rows from section 03's ablation CSV, if it has been populated."""
     import csv

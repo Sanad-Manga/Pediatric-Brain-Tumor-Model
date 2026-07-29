@@ -173,7 +173,7 @@ with col_main:
         <div class="panel-title">📄 Scan & Inference Metadata</div>
         <table class="meta-table">
             <tr><td class="meta-key">Subject ID</td>
-                <td class="meta-val" style="color:#38BDF8;font-family:'JetBrains Mono',monospace;font-weight:600;">{subject_id}</td></tr>
+                <td class="meta-val" style="color:#0284C7;font-family:'JetBrains Mono',monospace;font-weight:600;">{subject_id}</td></tr>
             <tr><td class="meta-key">Dataset Cohort</td>
                 <td class="meta-val">BraTS-PEDs (pediatric)</td></tr>
             <tr><td class="meta-key">MRI Modalities</td>
@@ -181,7 +181,7 @@ with col_main:
             <tr><td class="meta-key">Slice</td>
                 <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">{plane} · index {slice_index} · {pred.shape[0]} × {pred.shape[1]}</td></tr>
             <tr><td class="meta-key">Predicted Tumour Area</td>
-                <td class="meta-val" style="color:#00F2FE;font-weight:700;">{tumor_voxels:,} px</td></tr>
+                <td class="meta-val" style="color:#0891B2;font-weight:700;">{tumor_voxels:,} px</td></tr>
             <tr><td class="meta-key">Ground-truth Tumour Area</td>
                 <td class="meta-val">{int((truth > 0).sum()):,} px</td></tr>
             <tr><td class="meta-key">Architecture</td>
@@ -254,7 +254,7 @@ with col_side:
     <div class="panel" style="text-align:center;">
         <div class="panel-title" style="justify-content:center;">📊 Prediction Confidence</div>
         <div style="width:110px;height:110px;border-radius:50%;
-             background:conic-gradient(#34D399 0% {conf_pct:.1f}%, rgba(255,255,255,0.07) {conf_pct:.1f}% 100%);
+             background:conic-gradient(#059669 0% {conf_pct:.1f}%, #E2E8F0 {conf_pct:.1f}% 100%);
              display:flex;align-items:center;justify-content:center;margin:0 auto 12px auto;
              box-shadow:0 0 24px rgba(52,211,153,0.25);">
             <div class="conf-inner">
@@ -273,9 +273,9 @@ with col_side:
         <div class="panel-title">⚡ Dice · This Slice</div>
         <table class="meta-table">
             <tr><td class="meta-key">ET</td><td class="meta-val" style="color:#EF4444;font-family:monospace;">{dice_cell(dice['ET'])}</td></tr>
-            <tr><td class="meta-key">TC</td><td class="meta-val" style="color:#818CF8;font-family:monospace;">{dice_cell(dice['TC'])}</td></tr>
-            <tr><td class="meta-key">WT</td><td class="meta-val" style="color:#38BDF8;font-family:monospace;">{dice_cell(dice['WT'])}</td></tr>
-            <tr><td class="meta-key">Mean</td><td class="meta-val" style="color:#34D399;font-family:monospace;font-weight:700;">{dice_cell(dice['mean'])}</td></tr>
+            <tr><td class="meta-key">TC</td><td class="meta-val" style="color:#4F46E5;font-family:monospace;">{dice_cell(dice['TC'])}</td></tr>
+            <tr><td class="meta-key">WT</td><td class="meta-val" style="color:#0284C7;font-family:monospace;">{dice_cell(dice['WT'])}</td></tr>
+            <tr><td class="meta-key">Mean</td><td class="meta-val" style="color:#059669;font-family:monospace;font-weight:700;">{dice_cell(dice['mean'])}</td></tr>
         </table>
     </div>
     """, unsafe_allow_html=True)
@@ -288,7 +288,7 @@ with col_side:
             <tr><td class="meta-key">Epochs trained</td>
                 <td class="meta-val" style="font-family:monospace;">{status['epochs_completed']}</td></tr>
             <tr><td class="meta-key">Best val mean Dice</td>
-                <td class="meta-val" style="color:#34D399;font-family:monospace;font-weight:700;">
+                <td class="meta-val" style="color:#059669;font-family:monospace;font-weight:700;">
                 {f"{best:.4f}" if isinstance(best, (int, float)) else "n/a"}</td></tr>
             <tr><td class="meta-key">Tumour-type head</td>
                 <td class="meta-val" style="font-family:monospace;">{"present" if status['has_type_head'] else "absent"}</td></tr>
