@@ -1,10 +1,9 @@
 import streamlit as st
-import pandas as pd
 import time
 from datetime import datetime
 
 from components.theme import apply_custom_theme
-from utils.loaders import cache_available, list_demo_subjects, load_metrics_cache
+from utils.loaders import load_metrics_cache
 
 apply_custom_theme()
 
@@ -265,10 +264,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-col_l, col_r = st.columns(2, gap="large")
-
-with col_l:
-    st.markdown("""
+st.markdown("""
     <div class="data-panel">
         <div style="font-size:0.8rem; font-weight: 600; text-transform:uppercase; letter-spacing:0.05em; color:#64748B; margin-bottom:18px;">Reference Dataset Summary</div>
         <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
@@ -291,19 +287,6 @@ with col_l:
         </table>
     </div>
     """, unsafe_allow_html=True)
-
-with col_r:
-    if not cache_available():
-        st.write("") # Removed cache not found info
-    else:
-        _subjects = list_demo_subjects(limit=5)
-        cases_df = pd.DataFrame({
-            "Patient ID": _subjects,
-            "Modalities": ["T1c, T1, T2, FLAIR"] * len(_subjects),
-            "Status": ["Ready for review"] * len(_subjects),
-        })
-        st.dataframe(cases_df, use_container_width=True, hide_index=True)
-        st.caption("Open **Segmentation Report** to run analysis on any of these cases and export clinical reports.")
 
 # ──────────────────────────────────────────────────────────
 #  FOOTER

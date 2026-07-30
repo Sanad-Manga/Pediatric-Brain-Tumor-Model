@@ -216,6 +216,7 @@ def run(
     dummy_n: int = 4,
     cache_dir: Path | None = None,
     csv_path: str | Path | None = None,
+    write_csv: bool = True,
     device: str = "cpu",
     tmp_dir: Path | None = None,
 ) -> dict:
@@ -293,9 +294,6 @@ def run(
     # Keep the identity exact rather than a rounding artefact of the three parts.
     row["mean_dice"] = round((row["dice_ET"] + row["dice_NC"] + row["dice_WT"]) / 3.0, 6)
 
-    out = Path(csv_path) if csv_path else cfg.resolve("results_csv")
-    append_result_row(row, out)
-
     print(f"\n{experiment_name}: " +
           "  ".join(f"{r}={row[f'dice_{r}']:.4f}" for r in REGION_ORDER))
     print(f"  mean_dice={row['mean_dice']:.4f}")
@@ -305,7 +303,11 @@ def run(
           ", ".join(f"{r}={empty_gt[r]}" for r in REGION_ORDER))
     if single_plane:
         print(f"  single-plane subjects (expected both): {len(single_plane)}")
-    print(f"  wrote: {out}")
+
+    if write_csv:
+        out = Path(csv_path) if csv_path else cfg.resolve("results_csv")
+        append_result_row(row, out)
+        print(f"  wrote: {out}")
 
     row["_empty_ground_truth"] = empty_gt
     row["_n_subjects"] = len(per_subject)
