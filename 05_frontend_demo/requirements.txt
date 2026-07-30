@@ -4,3 +4,4 @@ pandas
 plotly
 fpdf2
 Pillow
+torch --index-url https://download.pytorch.org/whl/cpu
