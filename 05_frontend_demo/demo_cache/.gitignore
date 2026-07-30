@@ -1,0 +1,2 @@
+# Un-ignore .npz slice files in this demo cache — they are small and intentional.
+!*.npz

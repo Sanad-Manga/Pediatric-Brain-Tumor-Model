@@ -251,6 +251,7 @@ def run(
     dummy_n: int = 4,
     cache_dir: Path | None = None,
     csv_path: str | Path | None = None,
+    write_csv: bool = True,
     device: str = "cpu",
     tmp_dir: Path | None = None,
     subjects: list | None = None,

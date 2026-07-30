@@ -303,6 +303,7 @@ def cmd_eval(args) -> int:
             dummy_n=args.dummy_n,
             cache_dir=Path(args.cache) if args.cache else None,
             csv_path=args.out_csv,
+            write_csv=args.out_csv is not None,
             device=args.device,
             tmp_dir=tmp,
         )

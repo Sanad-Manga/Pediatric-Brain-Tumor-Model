@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="Clinical Explainability | NeuroFed AI", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="Clinical Explainability | NeuroPeds AI", page_icon="🩺", layout="wide")
 
 st.markdown("""
 <style>
@@ -128,9 +128,46 @@ st.markdown("""
         </tbody>
     </table>
 </div>
+""", unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+@keyframes pulseWarning {
+    0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+}
+.disclaimer {
+    background: linear-gradient(to right, rgba(254, 243, 199, 0.8), rgba(255, 251, 235, 0.9));
+    border-left: 4px solid #F59E0B;
+    border-radius: 12px; padding: 20px 24px;
+    font-size: 0.95rem; color: #92400E; line-height: 1.6; 
+    margin-top: 32px; margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
+    display: flex; align-items: flex-start; gap: 16px;
+}
+.disclaimer-icon {
+    font-size: 1.5rem;
+    background: #FFFBEB;
+    border-radius: 50%;
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    animation: pulseWarning 2s infinite;
+}
+.disclaimer-content b {
+    color: #B45309;
+    font-size: 1rem;
+    display: block;
+    margin-bottom: 4px;
+}
+</style>
 <div class="disclaimer">
-    <b>⚠️ Medical Disclaimer:</b> NeuroFed AI is a research-grade decision support platform designed to assist clinicians and researchers.
-    It does not replace independent clinical diagnosis or professional medical judgment.
+    <div class="disclaimer-icon">⚠️</div>
+    <div class="disclaimer-content">
+        <b>Medical Disclaimer</b>
+        NeuroPeds AI is a research-grade decision support platform designed to assist clinicians and researchers.
+        It does not replace independent clinical diagnosis or professional medical judgment. All outputs are for research purposes only.
+    </div>
 </div>
 """, unsafe_allow_html=True)

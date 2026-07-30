@@ -24,7 +24,10 @@ from .inference import (
 
 #: Where the 2D slice cache lives on the machine serving the demo. Override with
 #: the NEUROFED_CACHE_2D environment variable rather than editing this file.
-DEFAULT_CACHE_2D = os.environ.get("NEUROFED_CACHE_2D", "D:/pack_out")
+DEFAULT_CACHE_2D = os.environ.get(
+    "NEUROFED_CACHE_2D",
+    str(Path(__file__).resolve().parents[1] / "demo_cache"),
+)
 
 
 def cache_dir() -> Path:

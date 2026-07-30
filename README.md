@@ -1,4 +1,15 @@
-# Federated, Domain-Adaptive 3D Segmentation — Pediatric Brain Tumors
+---
+title: NeuroPeds AI
+emoji: 🧠
+colorFrom: blue
+colorTo: cyan
+sdk: streamlit
+sdk_version: 1.45.0
+app_file: 05_frontend_demo/Home.py
+pinned: false
+---
+
+# NeuroPeds AI — Pediatric Brain Tumor Segmentation
 
 Start here:
 1. Read `00_shared/CONTRACTS.md` — the fixed rules everyone builds against.
