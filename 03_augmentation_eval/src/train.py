@@ -133,7 +133,7 @@ def validate(model, subjects, cfg: Config, cache_dir, device="cpu",
 
 
 def save_checkpoint(path: Path, model, optimizer, epoch: int, best: float, cfg: Config,
-                    type_head=None) -> Path:
+                    type_head=None, scaler=None, val_subjects=None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "model_state_dict": model.state_dict(),
@@ -151,6 +151,13 @@ def save_checkpoint(path: Path, model, optimizer, epoch: int, best: float, cfg: 
     }
     if type_head is not None:
         payload["type_head_state_dict"] = type_head.state_dict()
+    if scaler is not None and scaler.is_enabled():
+        payload["scaler_state_dict"] = scaler.state_dict()
+    if val_subjects is not None:
+        # Carried on the checkpoint so anything tuning a threshold can recover
+        # the exact validation split without re-deriving it from a seed, and so
+        # tuning cannot silently drift onto held-out patients.
+        payload["val_subjects"] = list(val_subjects)
     torch.save(payload, path)
     return path
 
@@ -168,9 +175,19 @@ def run(
     device: str = "cpu",
     seed: int = 1337,
     resume: bool = True,
+    amp: bool | None = None,
+    num_workers: int = 0,
 ) -> dict:
-    """Train, validating per patient each epoch. Returns the run summary."""
+    """Train, validating per patient each epoch. Returns the run summary.
+
+    ``amp`` defaults to on for CUDA and is forced off elsewhere: fp16 autocast
+    needs tensor cores to be a win, and on CPU it is a slowdown. The T4 this
+    trains on has them, and they were sitting idle for every run before this.
+    """
     torch.manual_seed(seed)
+    use_amp = bool(str(device).startswith("cuda") and (amp is None or amp))
+    if amp and not str(device).startswith("cuda"):
+        LOGGER.warning("--amp ignored: it needs CUDA, and device is %r", device)
     cache_dir = Path(cache_dir) if cache_dir else cfg.resolve("cache_2d")
     ckpt_dir = Path(checkpoint_dir) if checkpoint_dir else (cfg.root / "checkpoints" / run_id)
 
@@ -187,7 +204,14 @@ def run(
 
     train_ds = SliceDataset(train_entries, cfg, cache_dir=cache_dir)
     sampler = PatientBalancedBatchSampler(train_entries, batch_size, cfg=cfg, seed=seed)
-    loader = DataLoader(train_ds, batch_sampler=sampler, collate_fn=collate, num_workers=0)
+    # Augmentation is seeded per entry (``entry["aug_seed"]``), not from a shared
+    # global RNG, so worker processes cannot draw correlated augmentations --
+    # which is the usual reason num_workers > 0 quietly changes a training run.
+    loader = DataLoader(train_ds, batch_sampler=sampler, collate_fn=collate,
+                        num_workers=num_workers,
+                        pin_memory=str(device).startswith("cuda"),
+                        persistent_workers=num_workers > 0)
+    LOGGER.info("amp: %s | dataloader workers: %d", use_amp, num_workers)
 
     model = build_model(cfg, spatial_dims=2).to(device)
     # Class-weighted CE. ET is the smallest and worst-scoring region, so a
@@ -219,6 +243,11 @@ def run(
     params = list(model.parameters()) + (list(type_head.parameters()) if type_head else [])
     optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=1e-5)
 
+    # The scaler keeps fp16 gradients from underflowing to zero. Its state is
+    # part of the run: restoring weights without it makes the first step after a
+    # resume take a badly-scaled gradient.
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+
     # Fixed lr made validation Dice oscillate late in the run; decay it so the
     # last epochs can settle instead of stepping over the minimum.
     scheduler = None
@@ -235,6 +264,8 @@ def run(
         if type_head is not None and "type_head_state_dict" in payload:
             type_head.load_state_dict(payload["type_head_state_dict"])
         optimizer.load_state_dict(payload["optimizer_state_dict"])
+        if use_amp and payload.get("scaler_state_dict"):
+            scaler.load_state_dict(payload["scaler_state_dict"])
         start_epoch = int(payload.get("epoch", 0)) + 1
         best = float(payload.get("best_mean_dice", -1.0))
         LOGGER.info("resumed from %s at epoch %d", last_path, start_epoch)
@@ -284,8 +315,9 @@ def run(
             image = batch["image"].to(device)
             label = batch["label"].to(device)
 
-            logits, features = model(image)
-            loss = loss_fn(logits, label)
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                logits, features = model(image)
+                loss = loss_fn(logits, label)
 
             if type_head is not None:
                 # Every slice in a batch inherits its patient's proxy label --
@@ -297,14 +329,19 @@ def run(
                         [type_lookup[batch["source_subject_id"][i]] for i in known],
                         dtype=torch.long, device=device,
                     )
-                    type_logits = type_head(features[known])
-                    type_loss = type_loss_fn(type_logits, targets)
+                    with torch.amp.autocast("cuda", enabled=use_amp):
+                        type_logits = type_head(features[known])
+                        type_loss = type_loss_fn(type_logits, targets)
                     loss = loss + cfg.tumor_type_loss_weight * type_loss
                     type_losses.append(float(type_loss.detach()))
 
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            # With AMP off, scaler is a documented no-op passthrough, so this is
+            # the same three operations as the plain loss.backward()/step() it
+            # replaces -- there is no separate non-AMP code path to keep in sync.
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             losses.append(float(loss.detach()))
 
             if step and step % 20 == 0:
@@ -337,15 +374,16 @@ def run(
         record["min_region_dice"] = round(min_region, 4)
         score = min_region if cfg.selection_metric == "min_region" else mean_dice
 
-        save_checkpoint(last_path, model, optimizer, epoch, max(best, score), cfg, type_head)
+        ckpt_kw = {"type_head": type_head, "scaler": scaler, "val_subjects": val_subjects}
+        save_checkpoint(last_path, model, optimizer, epoch, max(best, score), cfg, **ckpt_kw)
         if score > best:
             best = score
-            save_checkpoint(ckpt_dir / "best.pt", model, optimizer, epoch, best, cfg, type_head)
+            save_checkpoint(ckpt_dir / "best.pt", model, optimizer, epoch, best, cfg, **ckpt_kw)
             LOGGER.info("  new best by %s: %.4f (epoch %d)", cfg.selection_metric, best, epoch)
         if mean_dice > best_mean:
             best_mean = mean_dice
             save_checkpoint(ckpt_dir / "best_mean.pt", model, optimizer, epoch, best_mean,
-                            cfg, type_head)
+                            cfg, **ckpt_kw)
         if scheduler is not None:
             scheduler.step()
             record["lr"] = round(optimizer.param_groups[0]["lr"], 8)
