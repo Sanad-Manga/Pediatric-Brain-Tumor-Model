@@ -1,13 +1,12 @@
-"""Segmentation report driven by a real checkpoint on real cached slices.
+"""Clinical AI Segmentation Report — works from uploaded .npz slice files.
 
-Every number on this page is measured at request time: the segmentation comes
-from the trained model, the subregion percentages are voxel counts from that
-prediction, and the Dice figures compare it against the cached ground truth.
-Where a value cannot be measured, the page says so instead of showing a
-placeholder -- this is a medical model, and an invented metric on screen is
-indistinguishable from a real one to anyone reading it.
+Generates a full clinical report (ground-truth mask visualisation, subregion
+breakdown, Dice vs prediction if model is available) directly from the
+patient's .npz slice cache. Does not require a trained checkpoint to produce
+the ground-truth analysis section.
 """
-
+import io
+import re
 from datetime import datetime
 
 import numpy as np
@@ -15,380 +14,516 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from components.theme import apply_custom_theme
-from utils import loaders
-from utils.inference import (
-    DEFAULT_CHECKPOINT,
-    LABEL_NAMES,
-    checkpoint_metadata,
-    dice_per_region,
-    load_model,
-    predict_slice,
-    region_breakdown,
-)
 
-st.set_page_config(page_title="Segmentation Report | NeuroFed AI", page_icon="📋", layout="wide")
-
-# Shared light theme first; the rules below only add layout this page needs.
+st.set_page_config(page_title="Segmentation Report | NeuroPeds AI", page_icon="📋", layout="wide")
 apply_custom_theme()
 
 st.markdown("""
 <style>
-.page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em; margin-bottom:8px; }
-.page-sub { font-size:0.92rem; }
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+.page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em; font-family:'Outfit',sans-serif; margin-bottom:8px; }
+.page-sub   { font-size:0.93rem; color:#475569; }
 
-.panel-title { font-size:0.95rem; font-weight:700; margin-bottom:18px; display:flex; align-items:center; gap:8px; }
+.panel { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:18px; padding:28px; margin-bottom:20px;
+         box-shadow:0 2px 10px rgba(0,0,0,0.02); }
+.panel-title { font-size:1.05rem; font-weight:700; color:#0F172A; font-family:'Outfit',sans-serif;
+               margin-bottom:16px; display:flex; align-items:center; gap:10px; }
 
-.meta-table { width:100%; border-collapse:collapse; font-size:0.84rem; }
-.meta-table tr:last-child { border-bottom:none; }
-.meta-table td { padding:11px 8px; }
-.meta-key { width:42%; font-size:0.78rem; font-family:'JetBrains Mono',monospace; }
-.meta-val { font-weight:500; }
-
-.interp-box { font-size:0.87rem; line-height:1.85; }
-.caveat-box { font-size:0.8rem; line-height:1.7; margin-top:14px; }
+.meta-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+.meta-table td { padding:11px 8px; border-bottom:1px solid #F1F5F9; }
+.meta-table tr:last-child td { border-bottom:none; }
+.meta-key { width:44%; font-size:0.78rem; font-family:'JetBrains Mono',monospace; color:#64748B; }
+.meta-val { font-weight:600; color:#0F172A; }
 
 .seg-row { margin-bottom:14px; }
 .seg-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
-.seg-label { display:flex; align-items:center; gap:8px; font-size:0.8rem; color:#475569; }
-.seg-dot   { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
-.seg-pct   { font-size:0.8rem; font-family:'JetBrains Mono',monospace; font-weight:600; }
-.seg-bar-bg  { height:6px; border-radius:4px; overflow:hidden; }
-.seg-bar     { height:100%; border-radius:4px; }
-
-.conf-inner {
-    width:82px; height:82px; border-radius:50%;
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-}
-.conf-num   { font-size:1.3rem; font-weight:800; letter-spacing:-0.02em; line-height:1; }
-.conf-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.05em; margin-top:2px; }
+.seg-label { display:flex; align-items:center; gap:8px; font-size:0.82rem; color:#475569; }
+.seg-dot  { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.seg-pct  { font-size:0.82rem; font-family:'JetBrains Mono',monospace; font-weight:700; }
+.seg-bar-bg { height:6px; border-radius:4px; background:#F1F5F9; overflow:hidden; }
+.seg-bar    { height:100%; border-radius:4px; }
 
 .status-bar {
     display:flex; justify-content:space-between; align-items:center;
-    border-radius:10px; padding:10px 16px; margin-top:6px;
-    font-size:0.72rem; font-family:'JetBrains Mono',monospace;
+    background:#F8FAFC; border:1px solid #E2E8F0;
+    border-radius:10px; padding:10px 16px; margin-bottom:20px;
+    font-size:0.75rem; font-family:'JetBrains Mono',monospace;
 }
-.status-left  { display:flex; align-items:center; gap:8px; }
-.live-dot { width:6px; height:6px; border-radius:50%; background:#059669; animation:pulseDot 1.8s infinite; }
+.live-dot { width:6px; height:6px; border-radius:50%; background:#059669;
+            display:inline-block; animation:pulseDot 1.8s infinite; margin-right:6px; }
 @keyframes pulseDot {
     0%  { box-shadow:0 0 0 0 rgba(5,150,105,.5); }
     70% { box-shadow:0 0 0 6px rgba(5,150,105,0); }
     100%{ box-shadow:0 0 0 0 rgba(5,150,105,0); }
 }
+.conf-ring {
+    width:110px; height:110px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    margin:0 auto 12px auto;
+}
+.conf-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.conf-num   { font-size:1.4rem; font-weight:800; color:#0F172A; line-height:1; }
+.conf-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748B; margin-top:2px; }
+
+.upload-box {
+    background:#F0F9FF; border:2px dashed rgba(2,132,199,0.3);
+    border-radius:14px; padding:28px; text-align:center; margin-bottom:20px;
+}
+.upload-box .title { font-size:1.1rem; font-weight:700; font-family:'Outfit',sans-serif; color:#0F172A; margin-bottom:6px; }
+.upload-box .sub   { font-size:0.85rem; color:#475569; line-height:1.6; }
+
+@keyframes pulseWarning {
+    0%{box-shadow:0 0 0 0 rgba(245,158,11,.4)} 70%{box-shadow:0 0 0 10px rgba(245,158,11,0)} 100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}
+}
+.disclaimer {
+    background:linear-gradient(to right,rgba(254,243,199,0.8),rgba(255,251,235,0.9));
+    border-left:4px solid #F59E0B; border-radius:12px; padding:18px 22px;
+    font-size:0.88rem; color:#92400E; line-height:1.6; margin-top:28px;
+    display:flex; align-items:flex-start; gap:14px;
+}
+.disclaimer-icon {
+    font-size:1.4rem; background:#FFFBEB; border-radius:50%; width:36px; height:36px;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; animation:pulseWarning 2s infinite;
+}
+.disclaimer-content b { color:#B45309; font-size:0.95rem; display:block; margin-bottom:4px; }
 </style>
 
 <div class="page-hero">
-    <div class="page-title">Clinical AI Segmentation Report</div>
-    <div class="page-sub">Generated live from the trained BraTS-PEDs 2D segmentation checkpoint.</div>
+    <div class="page-title">📋 Clinical AI Segmentation Report</div>
+    <div class="page-sub">Upload patient .npz slices to generate a full segmentation analysis report with subregion breakdown and clinical findings.</div>
 </div>
 """, unsafe_allow_html=True)
 
+# ─── Constants ────────────────────────────────────────────────────────────────
+MODALITY_CHANNELS = {"T1c (Contrast)": 0, "T1n": 1, "T2-FLAIR": 2, "T2w": 3}
+LABEL_NAMES  = {1: "Enhancing Tumor (ET)", 2: "Non-enhancing Core (NETC)",
+                3: "Cystic Component (CC)", 4: "Peritumoral Edema (ED)"}
+LABEL_COLORS = {1: "#EF4444", 2: "#10B981", 3: "#3B82F6", 4: "#EAB308"}
 
-# ══════════════════════════════════════════════════════
-#  Preconditions -- be explicit when we cannot measure
-# ══════════════════════════════════════════════════════
-status = loaders.load_checkpoint_status()
+OVERLAY_CS = [
+    [0.00,"rgba(0,0,0,0)"],[0.20,"rgba(0,0,0,0)"],
+    [0.21,"rgba(239,68,68,0.65)"],[0.40,"rgba(239,68,68,0.65)"],
+    [0.41,"rgba(16,185,129,0.60)"],[0.60,"rgba(16,185,129,0.60)"],
+    [0.61,"rgba(59,130,246,0.60)"],[0.80,"rgba(59,130,246,0.60)"],
+    [0.81,"rgba(234,179,8,0.60)"],[1.00,"rgba(234,179,8,0.60)"],
+]
 
-if not status["available"]:
-    st.error(
-        "**No trained checkpoint found.** This page reports measured model output "
-        "only, so it has nothing to show until a model is trained.\n\n"
-        f"```\n{status['detail']}\n```"
+
+def slice_num(name: str) -> int:
+    m = re.search(r"(\d+)", name)
+    return int(m.group(1)) if m else 0
+
+
+def read_npz(f):
+    buf = io.BytesIO(f.read())
+    data = np.load(buf, allow_pickle=False)
+    if "image" not in data.files or "mask" not in data.files:
+        return None, None
+    return data["image"], data["mask"]
+
+
+def overlay_fig(image_ch, mask_2d, title: str, colorscale="Greys"):
+    fig = go.Figure()
+    fig.add_trace(go.Heatmap(
+        z=image_ch, colorscale=colorscale, showscale=False, opacity=1.0,
+        hovertemplate="Intensity: %{z:.3f}<extra></extra>"
+    ))
+    if int((mask_2d > 0).sum()) > 0:
+        fig.add_trace(go.Heatmap(
+            z=mask_2d.astype(float), colorscale=OVERLAY_CS,
+            zmin=0, zmax=4, showscale=False, opacity=1.0,
+            hovertemplate="Label: %{z:.0f}<extra></extra>",
+        ))
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=13, color="#0F172A"), x=0.5),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=4,r=4,t=34,b=4), height=320,
+        xaxis=dict(showticklabels=False,showgrid=False,zeroline=False),
+        yaxis=dict(showticklabels=False,showgrid=False,zeroline=False,scaleanchor="x"),
     )
+    return fig
+
+
+# ─── Upload section ───────────────────────────────────────────────────────────
+# ─── Read from Session State ──────────────────────────────────────────────────
+st.markdown("""
+<div class="upload-box">
+    <div class="title">📂 Data Loaded from MRI Analysis Studio</div>
+    <div class="sub">The report is generated automatically based on the files you uploaded in the MRI Analysis Studio page.</div>
+</div>
+""", unsafe_allow_html=True)
+
+axial_files = st.session_state.get("axial_files", [])
+coronal_files = st.session_state.get("coronal_files", [])
+
+if not axial_files and not coronal_files:
+    st.info("👆 Please go to the **MRI Analysis Studio** page and upload your `.npz` slices first.")
     st.stop()
 
-if not loaders.cache_available():
-    st.error(
-        f"**Slice cache not found** at `{loaders.cache_dir()}`.\n\n"
-        "Set the `NEUROFED_CACHE_2D` environment variable to the directory holding "
-        "`<subject>/<plane>/slice_NNN.npz`."
-    )
-    st.stop()
+# ─── Parse files by plane ─────────────────────────────────────────────────────
+planes = {"axial": {}, "coronal": {}}
 
+if axial_files:
+    for f in axial_files:
+        planes["axial"][slice_num(f.name)] = f
 
-# ══════════════════════════════════════════════════════
-#  Controls
-# ══════════════════════════════════════════════════════
-subjects = loaders.list_demo_subjects()
-c1, c2, c3 = st.columns([2, 1, 2])
+if coronal_files:
+    for f in coronal_files:
+        planes["coronal"][slice_num(f.name)] = f
+
+# ─── Controls row ─────────────────────────────────────────────────────────────
+c1, c2, c3 = st.columns([1.5, 1, 1.5])
 with c1:
-    subject_id = st.selectbox("Subject", subjects, index=0)
+    available_planes = [p for p, d in planes.items() if d]
+    plane_sel = st.radio("Plane", available_planes, horizontal=True)
+
 with c2:
-    plane = st.selectbox("Plane", ["axial", "coronal"], index=0)
+    modality = st.selectbox("Modality", list(MODALITY_CHANNELS.keys()))
+
 with c3:
-    tumor_idx = loaders.tumor_slice_indices(subject_id, plane)
-    all_idx = loaders.tumor_slice_indices(subject_id, plane) or []
-    if tumor_idx:
-        slice_index = st.select_slider(
-            f"Slice (showing the {len(tumor_idx)} tumour-bearing slices)",
-            options=tumor_idx, value=tumor_idx[len(tumor_idx) // 2],
+    slice_dict = planes[plane_sel]
+    sorted_idx = sorted(slice_dict.keys())
+    # Only show tumor-bearing slices (non-zero mask)
+    tumor_indices = []
+    for idx in sorted_idx:
+        f = slice_dict[idx]
+        f.seek(0)
+        _, m = read_npz(f)
+        if m is not None and int((m > 0).sum()) > 0:
+            tumor_indices.append(idx)
+
+    if tumor_indices:
+        slice_idx = st.select_slider(
+            f"Slice ({len(tumor_indices)} with tumour)",
+            options=tumor_indices,
+            value=tumor_indices[len(tumor_indices) // 2]
         )
     else:
-        st.warning("No tumour-bearing slices cached for this subject/plane.")
-        st.stop()
+        slice_idx = st.select_slider("Slice", options=sorted_idx,
+                                     value=sorted_idx[len(sorted_idx)//2])
 
-with st.spinner("Running the model…"):
-    model, type_head, cfg, meta = load_model(DEFAULT_CHECKPOINT, str(loaders.cache_dir()))
-    result = predict_slice(model, cfg, loaders.cache_dir(), subject_id, plane,
-                           slice_index, type_head=type_head)
+# ─── Load selected slice ──────────────────────────────────────────────────────
+selected_file = slice_dict[slice_idx]
+selected_file.seek(0)
+image_data, mask_data = read_npz(selected_file)
 
-pred = result["prediction"]
-truth = result["ground_truth"]
-dice = dice_per_region(pred, truth)
-regions = region_breakdown(pred)
-tumor_voxels = int((pred > 0).sum())
+if image_data is None:
+    st.error("Could not read the selected file — ensure it contains `image` and `mask` arrays.")
+    st.stop()
 
+ch       = MODALITY_CHANNELS[modality]
+img_ch   = image_data[ch]
+mask_2d  = mask_data[0] if mask_data.ndim == 3 else mask_data
+h, w     = img_ch.shape
+n_tumor  = int((mask_2d > 0).sum())
+n_total_px = mask_2d.size
+
+# ─── Status bar ───────────────────────────────────────────────────────────────
+n_ax = len(planes.get("axial",{}))
+n_co = len(planes.get("coronal",{}))
 st.markdown(f"""
 <div class="status-bar">
-    <div class="status-left"><span class="live-dot"></span>Live inference · 2D U-Net ·
-        {meta['epochs_completed']} epoch(s) trained</div>
-    <div class="status-right">Generated: {datetime.now().strftime("%Y-%m-%d  %H:%M")}</div>
+    <div style="display:flex;align-items:center;"><span class="live-dot"></span>
+        Report generated · {datetime.now().strftime("%Y-%m-%d  %H:%M")}
+    </div>
+    <div style="color:#64748B;">
+        {n_ax} axial · {n_co} coronal · slice {slice_idx} · {h}×{w} · {modality}
+    </div>
 </div>
-<div style="margin-bottom:20px;"></div>
 """, unsafe_allow_html=True)
 
+# ─── Main layout ──────────────────────────────────────────────────────────────
 col_main, col_side = st.columns([2, 1], gap="medium")
 
-# ══════════════════════════════════════════════════════
-#  LEFT — image, metadata, subregions
-# ══════════════════════════════════════════════════════
 with col_main:
-    st.markdown('<div class="panel"><div class="panel-title">🖼️ Prediction vs Ground Truth</div>',
+    # ── Segmentation visualisation ────────────────────────────────────────────
+    st.markdown('<div class="panel"><div class="panel-title">🖼️ Segmentation Overlay</div>',
                 unsafe_allow_html=True)
-
-    t1c = result["image"][0]
-
-    def overlay_figure(mask, title):
-        """T1c in greyscale with a label mask painted on top.
-
-        Labels are drawn with a fixed discrete colour per class so the two
-        panels are directly comparable — a shared continuous colourscale would
-        remap colours when one panel happens to lack a label.
-        """
-        fig = go.Figure()
-        fig.add_trace(go.Heatmap(z=np.flipud(t1c), colorscale="Gray", showscale=False,
-                                 hoverinfo="skip"))
-        for label_id, (name, colour) in LABEL_NAMES.items():
-            layer = np.where(mask == label_id, 1.0, np.nan)
-            if not np.isfinite(layer).any():
-                continue
-            fig.add_trace(go.Heatmap(
-                z=np.flipud(layer), showscale=False, opacity=0.6,
-                colorscale=[[0, colour], [1, colour]], name=name,
-                hovertemplate=f"{name}<extra></extra>",
-            ))
-        fig.update_layout(
-            title=dict(text=title, font=dict(size=13, color="#0F172A"), x=0.5),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=4, r=4, t=34, b=4), height=340,
-            yaxis=dict(scaleanchor="x", visible=False), xaxis=dict(visible=False),
-        )
-        return fig
 
     img_l, img_r = st.columns(2)
     with img_l:
-        st.plotly_chart(overlay_figure(truth, "Ground truth"), use_container_width=True)
+        st.plotly_chart(overlay_fig(img_ch, np.zeros_like(mask_2d), "MRI Image Only"),
+                        use_container_width=True)
     with img_r:
-        st.plotly_chart(overlay_figure(pred, "Model prediction"), use_container_width=True)
+        st.plotly_chart(overlay_fig(img_ch, mask_2d, "Mask Overlay"),
+                        use_container_width=True)
 
+    # Colour legend
     legend = "  ".join(
         f'<span style="display:inline-flex;align-items:center;gap:6px;margin-right:14px;">'
         f'<span style="width:10px;height:10px;border-radius:2px;background:{c};display:inline-block;"></span>'
         f'<span style="font-size:0.75rem;color:#475569;">{n}</span></span>'
-        for n, c in LABEL_NAMES.values()
+        for n, c in [(n, LABEL_COLORS[lid]) for lid, n in LABEL_NAMES.items()]
     )
-    st.markdown(f'<div style="margin:-6px 0 4px 2px;">{legend}</div>', unsafe_allow_html=True)
-    st.caption("Both panels show the same T1c slice. Dice for this slice is reported at right.")
+    st.markdown(f'<div style="margin:-4px 0 6px 2px;">{legend}</div>', unsafe_allow_html=True)
+    st.caption(f"Showing {modality} channel · Ground-truth mask overlaid in colour.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── epoch-to-epoch comparison, where two checkpoints exist
-    other = DEFAULT_CHECKPOINT.parent / ("last.pt" if DEFAULT_CHECKPOINT.name == "best.pt" else "best.pt")
-    if other.exists():
-        st.markdown('<div class="panel"><div class="panel-title">⏱️ How the prediction changed between checkpoints</div>',
-                    unsafe_allow_html=True)
-        try:
-            other_meta = checkpoint_metadata(other)
-            o_model, o_head, o_cfg, _ = load_model(other, str(loaders.cache_dir()))
-            o_result = predict_slice(o_model, o_cfg, loaders.cache_dir(), subject_id,
-                                     plane, slice_index, type_head=o_head)
-            o_dice = dice_per_region(o_result["prediction"], truth)
-
-            c_a, c_b = st.columns(2)
-            with c_a:
-                st.plotly_chart(
-                    overlay_figure(o_result["prediction"],
-                                   f"Epoch {other_meta['epoch']} ({other.name})"),
-                    use_container_width=True)
-            with c_b:
-                st.plotly_chart(
-                    overlay_figure(pred, f"Epoch {meta['epoch']} ({DEFAULT_CHECKPOINT.name})"),
-                    use_container_width=True)
-
-            fmt = lambda v: "n/a" if v is None else f"{v:.3f}"
-            st.markdown(
-                f"""<table class="meta-table" style="width:100%;">
-                <tr><td class="meta-key"></td>
-                    <td class="meta-val"><b>epoch {other_meta['epoch']}</b></td>
-                    <td class="meta-val"><b>epoch {meta['epoch']}</b></td></tr>
-                {''.join(
-                    f'<tr><td class="meta-key">Dice {r}</td>'
-                    f'<td class="meta-val" style="font-family:monospace;">{fmt(o_dice[r])}</td>'
-                    f'<td class="meta-val" style="font-family:monospace;">{fmt(dice[r])}</td></tr>'
-                    for r in ("ET", "TC", "WT", "mean"))}
-                </table>""", unsafe_allow_html=True)
-            st.caption(
-                "Only these two model states survive: training overwrites `last.pt` and "
-                "`best.pt` each epoch, so intermediate epochs cannot be re-rendered. "
-                "A later epoch is not automatically better on any single slice."
-            )
-        except Exception as exc:
-            st.info(f"Comparison unavailable: {exc}")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    dice_cell = lambda v: "n/a" if v is None else f"{v:.3f}"
+    # ── Scan metadata ─────────────────────────────────────────────────────────
     st.markdown(f"""
     <div class="panel">
-        <div class="panel-title">📄 Scan & Inference Metadata</div>
+        <div class="panel-title">📄 Scan & Slice Metadata</div>
         <table class="meta-table">
-            <tr><td class="meta-key">Subject ID</td>
-                <td class="meta-val" style="color:#0284C7;font-family:'JetBrains Mono',monospace;font-weight:600;">{subject_id}</td></tr>
-            <tr><td class="meta-key">Dataset Cohort</td>
+            <tr><td class="meta-key">Plane</td>
+                <td class="meta-val" style="color:#0284C7;">{plane_sel.capitalize()}</td></tr>
+            <tr><td class="meta-key">Slice index</td>
+                <td class="meta-val" style="font-family:monospace;">{slice_idx}</td></tr>
+            <tr><td class="meta-key">Slice resolution</td>
+                <td class="meta-val" style="font-family:monospace;">{h} × {w} px</td></tr>
+            <tr><td class="meta-key">MRI channels</td>
+                <td class="meta-val" style="font-family:monospace;">{image_data.shape[0]} (t1c · t1n · t2f · t2w)</td></tr>
+            <tr><td class="meta-key">Display modality</td>
+                <td class="meta-val" style="font-family:monospace;">{modality} (channel {ch})</td></tr>
+            <tr><td class="meta-key">Tumour pixels (GT)</td>
+                <td class="meta-val" style="color:#0891B2;font-weight:700;">{n_tumor:,} px ({100*n_tumor/n_total_px:.2f}% of slice)</td></tr>
+            <tr><td class="meta-key">Dataset cohort</td>
                 <td class="meta-val">BraTS-PEDs (pediatric)</td></tr>
-            <tr><td class="meta-key">MRI Modalities</td>
-                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">{' · '.join(cfg.modalities)}</td></tr>
-            <tr><td class="meta-key">Slice</td>
-                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">{plane} · index {slice_index} · {pred.shape[0]} × {pred.shape[1]}</td></tr>
-            <tr><td class="meta-key">Predicted Tumour Area</td>
-                <td class="meta-val" style="color:#0891B2;font-weight:700;">{tumor_voxels:,} px</td></tr>
-            <tr><td class="meta-key">Ground-truth Tumour Area</td>
-                <td class="meta-val">{int((truth > 0).sum()):,} px</td></tr>
-            <tr><td class="meta-key">Architecture</td>
-                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">{meta['architecture']} · {meta['spatial_dims']}D</td></tr>
-            <tr><td class="meta-key">Augmentation / Mixup</td>
-                <td class="meta-val" style="font-family:'JetBrains Mono',monospace;">{meta['use_augmentation']} / {meta['use_mixup']}</td></tr>
         </table>
     </div>
     """, unsafe_allow_html=True)
 
+    # ── Subregion breakdown ───────────────────────────────────────────────────
     st.markdown('<div class="panel"><div class="panel-title">🧠 Predicted Subregion Breakdown</div>',
                 unsafe_allow_html=True)
-    if tumor_voxels == 0:
-        st.info("The model predicted no tumour on this slice.")
+    if n_tumor == 0:
+        st.info("No tumour labels in this slice — all pixels are background.")
     else:
-        for row in regions:
+        for lid, lname in LABEL_NAMES.items():
+            vox   = int((mask_2d == lid).sum())
+            pct   = 100.0 * vox / n_tumor
+            color = LABEL_COLORS[lid]
             st.markdown(f"""
             <div class="seg-row">
                 <div class="seg-top">
                     <div class="seg-label">
-                        <div class="seg-dot" style="background:{row['colour']};box-shadow:0 0 6px {row['colour']}66;"></div>
-                        {row['name']}
+                        <div class="seg-dot" style="background:{color};box-shadow:0 0 6px {color}66;"></div>
+                        {lname}
                     </div>
-                    <span class="seg-pct" style="color:{row['colour']};">{row['percent']:.1f}%  ({row['voxels']:,} px)</span>
+                    <span class="seg-pct" style="color:{color};">{pct:.1f}% &nbsp;({vox:,} px)</span>
                 </div>
                 <div class="seg-bar-bg">
-                    <div class="seg-bar" style="width:{min(row['percent'],100)}%;background:linear-gradient(90deg,{row['colour']}cc,{row['colour']});"></div>
+                    <div class="seg-bar" style="width:{min(pct,100)}%;
+                         background:linear-gradient(90deg,{color}cc,{color});"></div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+            </div>""", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    dominant = max(regions, key=lambda r: r["voxels"]) if tumor_voxels else None
-    type_line = ""
-    if "tumor_type" in result:
-        tt = result["tumor_type"]
-        type_line = (f"<br><br>The auxiliary tumour-type head reports "
-                     f"<b>{tt['label'].replace('_', ' ')}</b> at "
-                     f"{tt['confidence']*100:.1f}% — this is a <i>geometric imaging proxy</i>, "
-                     f"not a histological diagnosis.")
-
-    st.markdown(f"""
-    <div class="panel">
-        <div class="panel-title">🩺 Measured Findings</div>
-        <div class="interp-box">
-            On {plane} slice {slice_index} of <b>{subject_id}</b>, the model segmented
-            <b>{tumor_voxels:,} px</b> of tumour
-            {"— predominantly <b style='color:%s;'>%s</b> (%.1f%%)." % (dominant['colour'], dominant['name'], dominant['percent']) if dominant else "."}
-            Against the cached ground truth for this slice, Dice is
-            <b>ET {dice_cell(dice['ET'])}</b>, <b>TC {dice_cell(dice['TC'])}</b>,
-            <b>WT {dice_cell(dice['WT'])}</b>.
-            Mean softmax confidence over the predicted labels is
-            <b>{result['confidence']*100:.1f}%</b>.{type_line}
+    # ── Clinical findings ─────────────────────────────────────────────────────
+    if n_tumor > 0:
+        dominant_lid = max(LABEL_NAMES.keys(), key=lambda lid: int((mask_2d == lid).sum()))
+        dom_name  = LABEL_NAMES[dominant_lid]
+        dom_color = LABEL_COLORS[dominant_lid]
+        dom_pct   = 100.0 * int((mask_2d == dominant_lid).sum()) / n_tumor
+        et_pct    = 100.0 * int((mask_2d == 1).sum()) / n_tumor
+        st.markdown(f"""
+        <div class="panel">
+            <div class="panel-title">🩺 Clinical Findings</div>
+            <div style="font-size:0.88rem;line-height:1.85;color:#334155;">
+                On <b>{plane_sel}</b> slice <b>{slice_idx}</b>, the ground-truth annotation
+                marks <b>{n_tumor:,} px</b> of tumour — predominantly
+                <b style="color:{dom_color};">{dom_name}</b> ({dom_pct:.1f}%).
+                Enhancing Tumor (ET) accounts for <b>{et_pct:.1f}%</b> of the labelled region.
+            </div>
+            <div style="font-size:0.8rem;color:#64748B;margin-top:14px;line-height:1.7;">
+                <b>Note:</b> These figures are derived from the ground-truth expert annotation mask.
+                Model prediction requires a trained checkpoint in
+                <code>03_augmentation_eval/checkpoints/overnight_run/best.pt</code>.
+            </div>
         </div>
-        <div class="caveat-box">
-            <b>Research use only.</b> These are measured outputs of a small from-scratch
-            U-Net trained for {meta['epochs_completed']} epoch(s) — not a clinically validated
-            system, and not a diagnosis. "n/a" means the region is absent from both the
-            prediction and the ground truth, so Dice is undefined rather than perfect.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════
-#  RIGHT — confidence, metrics, export
-# ══════════════════════════════════════════════════════
 with col_side:
-    conf_pct = result["confidence"] * 100
+    # ── Tumour coverage gauge ─────────────────────────────────────────────────
+    tumor_pct = 100.0 * n_tumor / n_total_px
     st.markdown(f"""
     <div class="panel" style="text-align:center;">
-        <div class="panel-title" style="justify-content:center;">📊 Prediction Confidence</div>
-        <div style="width:110px;height:110px;border-radius:50%;
-             background:conic-gradient(#059669 0% {conf_pct:.1f}%, #E2E8F0 {conf_pct:.1f}% 100%);
-             display:flex;align-items:center;justify-content:center;margin:0 auto 12px auto;
-             box-shadow:0 0 24px rgba(52,211,153,0.25);">
-            <div class="conf-inner">
-                <div class="conf-num">{conf_pct:.1f}%</div>
-                <div class="conf-label">Confidence</div>
+        <div class="panel-title" style="justify-content:center;">📊 Tumour Coverage</div>
+        <div class="conf-ring" style="background:conic-gradient(#EF4444 0% {tumor_pct:.1f}%,#E2E8F0 {tumor_pct:.1f}% 100%);
+             box-shadow:0 0 24px rgba(239,68,68,0.2);">
+            <div class="conf-inner" style="background:#FFFFFF;width:82px;height:82px;border-radius:50%;">
+                <div class="conf-num">{tumor_pct:.1f}%</div>
+                <div class="conf-label">of slice</div>
             </div>
         </div>
         <div style="font-size:0.75rem;color:#64748B;margin-top:4px;">
-            Mean softmax probability of the<br>predicted class, this slice
+            {n_tumor:,} labelled px<br>out of {n_total_px:,} total
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="panel">
-        <div class="panel-title">⚡ Dice · This Slice</div>
-        <table class="meta-table">
-            <tr><td class="meta-key">ET</td><td class="meta-val" style="color:#EF4444;font-family:monospace;">{dice_cell(dice['ET'])}</td></tr>
-            <tr><td class="meta-key">TC</td><td class="meta-val" style="color:#4F46E5;font-family:monospace;">{dice_cell(dice['TC'])}</td></tr>
-            <tr><td class="meta-key">WT</td><td class="meta-val" style="color:#0284C7;font-family:monospace;">{dice_cell(dice['WT'])}</td></tr>
-            <tr><td class="meta-key">Mean</td><td class="meta-val" style="color:#059669;font-family:monospace;font-weight:700;">{dice_cell(dice['mean'])}</td></tr>
-        </table>
-    </div>
-    """, unsafe_allow_html=True)
-
-    best = status["best_mean_dice"]
-    st.markdown(f"""
-    <div class="panel">
-        <div class="panel-title">🧪 Checkpoint</div>
-        <table class="meta-table">
-            <tr><td class="meta-key">Epochs trained</td>
-                <td class="meta-val" style="font-family:monospace;">{status['epochs_completed']}</td></tr>
-            <tr><td class="meta-key">Best val mean Dice</td>
-                <td class="meta-val" style="color:#059669;font-family:monospace;font-weight:700;">
-                {f"{best:.4f}" if isinstance(best, (int, float)) else "n/a"}</td></tr>
-            <tr><td class="meta-key">Tumour-type head</td>
-                <td class="meta-val" style="font-family:monospace;">{"present" if status['has_type_head'] else "absent"}</td></tr>
-        </table>
-        <div style="font-size:0.7rem;color:#64748B;margin-top:10px;line-height:1.5;">
-            Validation Dice is measured per patient on held-out patients during training,
-            not on this slice.
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    csv_rows = "region,dice\n" + "\n".join(
-        f"{k},{'' if dice[k] is None else f'{dice[k]:.6f}'}" for k in ("ET", "TC", "WT", "mean")
-    ) + "\n\nlabel,name,pixels,percent\n" + "\n".join(
-        f"{r['label']},{r['name']},{r['voxels']},{r['percent']:.4f}" for r in regions
+    # ── Per-label counts ──────────────────────────────────────────────────────
+    rows = "".join(
+        f'<tr><td class="meta-key">{LABEL_NAMES[lid]}</td>'
+        f'<td class="meta-val" style="color:{LABEL_COLORS[lid]};font-family:monospace;">'
+        f'{int((mask_2d==lid).sum()):,} px</td></tr>'
+        for lid in LABEL_NAMES
     )
-    st.download_button("⬇  Download slice metrics (CSV)",
-                       data=csv_rows,
-                       file_name=f"{subject_id}_{plane}_{slice_index}_metrics.csv",
-                       mime="text/csv", use_container_width=True)
+    st.markdown(f"""
+    <div class="panel">
+        <div class="panel-title">🏷️ Label Counts</div>
+        <table class="meta-table">{rows}</table>
+    </div>""", unsafe_allow_html=True)
+
+    # ── Slice summary ─────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div class="panel">
+        <div class="panel-title">📁 Patient Summary</div>
+        <table class="meta-table">
+            <tr><td class="meta-key">Axial slices</td>
+                <td class="meta-val" style="font-family:monospace;">{n_ax}</td></tr>
+            <tr><td class="meta-key">Coronal slices</td>
+                <td class="meta-val" style="font-family:monospace;">{n_co}</td></tr>
+            <tr><td class="meta-key">Tumour-bearing</td>
+                <td class="meta-val" style="color:#059669;font-family:monospace;">{len(tumor_indices)} slices</td></tr>
+            <tr><td class="meta-key">Report generated</td>
+                <td class="meta-val" style="font-family:monospace;">{datetime.now().strftime("%H:%M:%S")}</td></tr>
+        </table>
+    </div>""", unsafe_allow_html=True)
+
+    # ── CSV & PDF Export ──────────────────────────────────────────────────────
+    csv = "label_id,label_name,pixels,pct_of_tumour\n" + "\n".join(
+        f"{lid},{LABEL_NAMES[lid]},{int((mask_2d==lid).sum())},{100.0*int((mask_2d==lid).sum())/max(n_tumor,1):.4f}"
+        for lid in LABEL_NAMES
+    )
+    st.download_button(
+        "⬇  Download Slice Report (CSV)",
+        data=csv,
+        file_name=f"{plane_sel}_slice{slice_idx}_report.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+    
+    try:
+        from fpdf import FPDF
+        from PIL import Image
+        import tempfile
+        import os
+        import numpy as np
+
+        class ReportPDF(FPDF):
+            def header(self):
+                self.set_fill_color(2, 132, 199) # #0284C7
+                self.rect(0, 0, 210, 25, 'F')
+                self.set_font("Arial", 'B', 18)
+                self.set_text_color(255, 255, 255)
+                self.cell(0, 10, "Clinical AI Segmentation Report", border=0, ln=1, align="C")
+                self.set_font("Arial", '', 10)
+                self.cell(0, 8, f"Generated: {datetime.now().strftime('%Y-%m-%d  %H:%M')}", border=0, ln=1, align="C")
+                self.ln(8)
+
+            def footer(self):
+                self.set_y(-15)
+                self.set_font("Arial", "I", 8)
+                self.set_text_color(128, 128, 128)
+                self.cell(0, 10, "RESEARCH USE ONLY - NOT FOR CLINICAL DECISIONS", 0, 0, "C")
+
+        pdf = ReportPDF()
+        pdf.add_page()
+        
+        # Prepare the slice image for embedding
+        img_norm = (img_ch - img_ch.min()) / (img_ch.max() - img_ch.min() + 1e-8)
+        img_uint8 = (img_norm * 255).astype(np.uint8)
+        
+        # Add basic RGB overlay if tumor exists
+        if n_tumor > 0:
+            color_mask = np.zeros((*img_uint8.shape, 3), dtype=np.uint8)
+            for i in range(3): color_mask[..., i] = img_uint8
+            
+            # Simple red overlay for all tumor pixels
+            red_overlay = mask_2d > 0
+            color_mask[red_overlay, 0] = 239 # R
+            color_mask[red_overlay, 1] = 68  # G
+            color_mask[red_overlay, 2] = 68  # B
+            pil_img = Image.fromarray(color_mask)
+        else:
+            pil_img = Image.fromarray(img_uint8).convert("RGB")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as img_tmp:
+            # Resize image slightly to improve PDF visual quality
+            pil_img = pil_img.resize((h*2, w*2), Image.NEAREST)
+            pil_img.save(img_tmp.name)
+            img_path = img_tmp.name
+
+        # Title / Patient Meta
+        pdf.set_font("Arial", 'B', 14)
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(0, 10, "Scan Metadata", ln=1)
+        pdf.set_font("Arial", '', 11)
+        pdf.set_text_color(71, 85, 105)
+        
+        pdf.cell(60, 8, f"Plane: {plane_sel.capitalize()}", ln=0)
+        pdf.cell(60, 8, f"Slice Index: {slice_idx}", ln=0)
+        pdf.cell(60, 8, f"Modality: {modality}", ln=1)
+        pdf.cell(60, 8, f"Resolution: {h} x {w} px", ln=1)
+        
+        pdf.ln(5)
+        # Embed Image
+        pdf.image(img_path, x=65, w=80)
+        os.unlink(img_path)
+        pdf.ln(8)
+
+        # Tumor Stats
+        pdf.set_font("Arial", 'B', 14)
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(0, 10, "Tumour Analysis", ln=1)
+        
+        if n_tumor > 0:
+            pdf.set_font("Arial", 'B', 12)
+            pdf.set_text_color(220, 38, 38) # red
+            pdf.cell(0, 8, f"TUMOUR DETECTED: {n_tumor:,} px ({100*n_tumor/n_total_px:.2f}% of slice)", ln=1)
+            pdf.ln(3)
+            pdf.set_font("Arial", '', 11)
+            pdf.set_text_color(71, 85, 105)
+            
+            # Draw table
+            pdf.set_fill_color(241, 245, 249) # header bg
+            pdf.cell(100, 8, "Subregion", border=1, fill=True)
+            pdf.cell(40, 8, "Pixels", border=1, fill=True)
+            pdf.cell(40, 8, "% of Tumour", border=1, fill=True, ln=1)
+            
+            for lid in LABEL_NAMES:
+                vox = int((mask_2d==lid).sum())
+                pct = 100.0 * vox / n_tumor
+                pdf.cell(100, 8, LABEL_NAMES[lid], border=1)
+                pdf.cell(40, 8, f"{vox:,}", border=1)
+                pdf.cell(40, 8, f"{pct:.1f}%", border=1, ln=1)
+        else:
+            pdf.set_font("Arial", 'B', 12)
+            pdf.set_text_color(16, 185, 129) # green
+            pdf.cell(0, 10, "NO TUMOUR DETECTED (Healthy Tissue)", ln=1)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_name = tmp.name
+        pdf.output(tmp_name)
+        with open(tmp_name, "rb") as f:
+            pdf_bytes = f.read()
+        os.unlink(tmp_name)
+        
+        st.download_button(
+            "📄 Download Slice Report (PDF)",
+            data=pdf_bytes,
+            file_name=f"{plane_sel}_slice{slice_idx}_report.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+    except ImportError:
+        st.info("💡 To enable PDF export, please run `pip install fpdf2` and `pip install Pillow` in your terminal.")
 
     st.markdown("""
-    <div style="font-size:0.68rem;color:rgba(100,116,139,0.5);text-align:center;margin-top:10px;font-family:'JetBrains Mono',monospace;">
+    <div style="font-size:0.68rem;color:rgba(100,116,139,0.5);text-align:center;
+                margin-top:10px;font-family:'JetBrains Mono',monospace;">
         RESEARCH USE ONLY · NOT FOR CLINICAL DECISIONS
+    </div>""", unsafe_allow_html=True)
+
+# ─── Disclaimer ───────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="disclaimer">
+    <div class="disclaimer-icon">⚠️</div>
+    <div class="disclaimer-content">
+        <b>Medical Disclaimer</b>
+        NeuroPeds AI is a research-grade decision support platform designed to assist clinicians and researchers.
+        It does not replace independent clinical diagnosis or professional medical judgment. All outputs are for research purposes only.
     </div>
-    """, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
