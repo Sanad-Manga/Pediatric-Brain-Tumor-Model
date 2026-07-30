@@ -175,6 +175,23 @@ def unpad(arr: np.ndarray, pad) -> np.ndarray:
     return arr[..., top:h, left:w]
 
 
+def _load_slice(cache_dir, cfg, subject_id, plane, slice_index):
+    """Padded slice for inference: ``(image, label, pad, orig_shape)``.
+
+    Mirrors the function of the same name in ``dataset.py`` but lives here so
+    callers that only need I/O don't pull in the augmentation / monai imports.
+    """
+    data = load_slice(cache_dir, subject_id, plane, slice_index)
+    image = np.asarray(data["image"], dtype=np.float32)
+    label = np.asarray(data["mask"], dtype=np.int64)
+    if label.ndim == 2:
+        label = label[None]
+    orig_shape = tuple(image.shape[-2:])
+    image, pad = pad_to(image, cfg.common_size)
+    label, _ = pad_to(label, cfg.common_size)
+    return image, label, pad, orig_shape
+
+
 def extract_plane_slices(volume: np.ndarray, axis: int) -> np.ndarray:
     """Slice a volume along ``axis`` into ``(N, H, W)``. Used by the dummy cache."""
     if volume.ndim != 3:
