@@ -13,7 +13,7 @@ pinned: false
 
 A 2D U-Net segmentation system for pediatric brain tumors, trained on the BraTS-PEDs 2024 dataset. Built as part of a medical AI workshop.
 
-**Live demo:** https://a-sanad-neuropeds-ai.hf.space *(HuggingFace Space)*
+**Live demo:** https://neuropeds-ai.streamlit.app
 
 ## What it does
 
