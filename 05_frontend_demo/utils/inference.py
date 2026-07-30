@@ -30,9 +30,8 @@ if str(_SECTION_03) not in sys.path:
     sys.path.insert(0, str(_SECTION_03))
 
 from src.config import load_config                      # noqa: E402
-from src.dataset import _load_slice                     # noqa: E402
 from src.model import TumorTypeHead, build_model, infer_geometry  # noqa: E402
-from src.slices import list_slice_indices, list_subjects, unpad  # noqa: E402
+from src.slices import _load_slice, list_slice_indices, list_subjects, unpad  # noqa: E402
 from src.tumor_type import TYPE_LABELS                  # noqa: E402
 
 #: label id -> (display name, hex colour). Matches the cache's 0-4 encoding.
