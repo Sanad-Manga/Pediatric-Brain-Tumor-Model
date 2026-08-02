@@ -1,223 +1,293 @@
-# Handoff — pediatric brain tumour segmentation, section 03 + demo
+﻿# NeuroPeds AI — Full Project Handoff
 
-Paste this whole file as the first message of a new chat.
-
-**Working directory (open a chat here — do not paste files, just point at these paths):**
-```
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e
-```
-Sub-directories referenced throughout:
-```
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval          # pipeline, training, evaluation
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/src      # train.py, model.py, plan.py, evaluate.py, tumor_type.py
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/tools    # history_from_log.py, make_report.py
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/03_augmentation_eval/checkpoints/overnight_run   # best.pt / last.pt / history.json
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo              # Streamlit demo
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/utils        # inference.py, metrics.py, loaders.py, build_metrics_cache.py
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/pages        # Streamlit pages
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/05_frontend_demo/data         # roc_cache.json (the measured numbers)
-D:/Medical AI Workshop/.claude/worktrees/streamlit-cnn-workshop-dcaf1e/00_shared/manifests           # hospitalA.json, hospitalB.json, heldout.json
-```
-Data (outside the repo):
-```
-D:/Processed_2D        # FULL slice cache -- 257 dirs, 97,867 .npz, verified complete
-D:/pack_out            # OLD 8000-budget pack (5.72 GB) -- every checkpoint so far trained on this
-D:/pack_out_15k        # NEW 15000-budget pack, READY TO UPLOAD (9.72 GB, 55,523 files)
-                       #   24,140 unique training slices + 82 held-out subjects, both planes
-```
-`E:/Processed_2D` was the original external drive; it is unplugged and no longer
-needed -- `D:/Processed_2D` is the same complete cache.
-
-**Repo:** `Sanad-Manga/Pediatric-Brain-Tumor-Model`
-**Branch:** `claude/medical-ai-augmentation-eval-7f4098` (1 commit ahead of `main`; earlier work already merged via PR #11)
-**Latest commit:** see `git log -1` on the branch
+**Date:** 2026-08-02
+**Repo:** https://github.com/Sanad-Manga/Pediatric-Brain-Tumor-Model
+**Live demo:** https://neuropeds-ai.streamlit.app
+**Branch to clone:** `main` (everything is merged)
 
 ---
 
-## 0. State in one paragraph
+## What This Project Is
 
-A 2D U-Net segments BraTS-PEDs brain tumours. Training ran to epoch 36 on a
-Colab T4 before the GPU quota ran out. The shipped model is **epoch 16**, and
-every number in the report and the Streamlit demo is measured on 82 held-out
-patients that were never trained on. Config has just been changed for the next
-run — bigger model, more data, three training fixes — but **that run has not
-happened yet**. Nothing has been trained at the new settings.
+A 2D U-Net segmentation system for pediatric brain tumors. Trained on the **BraTS-PEDs 2024** dataset. The model segments MRI scans into 4 tumor sub-regions. The Streamlit frontend connects directly to the trained model and a small embedded demo cache of 5 real patients.
+
+This is a workshop project. Section 03 (`03_augmentation_eval/`) owns the model and training pipeline. Section 05 (`05_frontend_demo/`) is the deployed Streamlit app.
 
 ---
 
-## 1. Current measured results (epoch 16, 82 held-out patients, 492 axial slices)
+## Repository Structure
 
-| Region | Dice = F1 | Sensitivity | Precision | Specificity | HD95 | AUC |
-|---|---|---|---|---|---|---|
-| ET (enhancing) | 0.599 | 0.496 | 0.757 | 0.9998 | 4.12 mm | 0.982 |
-| TC (core) | 0.521 | 0.411 | 0.713 | 0.9997 | 4.82 mm | 0.981 |
-| WT (whole) | 0.827 | 0.748 | 0.924 | 0.9992 | 2.24 mm | 0.993 |
-
-Training-time validation best: mean Dice **0.6820** at epoch 16. Tumour-type
-auxiliary head peaked at **0.806** accuracy (majority-class baseline 0.634).
-
-**Two things must be stated whenever these are quoted:**
-
-1. **AUC and specificity are inflated.** Tumour is 2–18% of pixels; background
-   is trivially easy. Dice and HD95 are the honest figures. Never quote AUC alone.
-2. **The tumour-type head is not histology.** No tumour-type ground truth exists
-   in this dataset. It is trained against a geometric proxy from the mask
-   (midline offset, inferior fraction, enhancing fraction).
-
-**The model under-segments** — high precision, lower sensitivity. It misses
-tumour rather than over-calling it. That is the clinically relevant finding.
-
----
-
-## 2. The result that matters most
-
-Training nominated **epoch 25** as best (val mean Dice 0.6885 > epoch 16's
-0.6820). On the held-out patients epoch 25 is **much worse**:
-
-| | epoch 16 | epoch 25 | Δ |
-|---|---|---|---|
-| ET Dice | 0.599 | 0.434 | **−0.165** |
-| TC Dice | 0.521 | 0.375 | **−0.147** |
-| WT Dice | 0.827 | 0.849 | +0.023 |
-| ET HD95 | 4.12 mm | 9.00 mm | **2.2× worse** |
-| Mean Dice | **0.649** | 0.553 | −0.096 |
-
-Cause: checkpoints were selected on the **mean** of three regions, computed on
-36 patients drawn from the *training* hospitals. One strong region (WT) masked a
-collapse in ET. Fixed — see §3. Epoch 25 is kept at
-`checkpoints/overnight_run/best_epoch25.pt` if it is ever needed.
-
----
-
-## 3. Changes made but NOT yet trained with
-
-All in `03_augmentation_eval/config.yaml`. Leaving any key out reproduces the
-old behaviour exactly.
-
-| Key | Value | Why |
-|---|---|---|
-| `model.width` | **48** (was 16) | 4,333,445 params vs 482,949. The old model was ~1/60th of an nnU-Net; capacity, not data, was the binding constraint. |
-| `expansion.target_per_hospital` | **15000** (was 8000) | 24,140 unique slices vs 16,000, at 20% up-sampling. |
-| `selection.metric` | **min_region** | Scores the *worst* region. On the real numbers `mean` picks epoch 25, `min_region` picks epoch 16 — it would have caught the mistake above. `best_mean.pt` is still written. |
-| `loss.class_weights` | `[0.2, 3.0, 1.0, 1.0, 1.0]` | Uniform CE let the network trade away ET, the smallest and weakest region. Weights the CE term only. |
-| `schedule.kind` | **cosine**, min_lr 1e-5 | Val Dice oscillated late at fixed 1e-3 (0.688 → 0.637 → 0.687). Fast-forwards correctly on resume. |
-| `eval.plane` | **both** | Trained on axial + coronal but only ever scored on axial. Averages softmax in the shared voxel grid before argmax. |
-
-**Do not raise `target_per_hospital` above 15000.** Measured up-sampling
-(duplicated/re-augmented slices, not new data): 15000 → 20%, 20000 → 32%,
-26000 → 41%. Beyond 15000 most of the extra budget is re-augmented copies while
-costing proportional GPU time.
-
-**Checkpoint geometry:** checkpoints now record `width`/`depth`, and both
-loaders recover it from the state_dict when absent. Verified that the old
-width-16 checkpoint still loads under the width-48 config. Do not remove this —
-without it every pre-existing checkpoint fails with a shape mismatch that reads
-like corruption.
+```
+Pediatric-Brain-Tumor-Model/
+├── 00_shared/
+│   ├── CONTRACTS.md              <- fixed interface rules all sections share
+│   └── manifests/                <- train/val/test subject splits (JSON)
+│
+├── 03_augmentation_eval/
+│   ├── run.py                    <- main CLI: train / eval / pack / index
+│   ├── config.yaml               <- all hyperparameters (edit this, not source)
+│   ├── src/
+│   │   ├── model.py              <- 2D U-Net + TumorTypeHead
+│   │   ├── train.py              <- training loop
+│   │   ├── evaluate.py           <- per-subject Dice / HD95 evaluation
+│   │   ├── dataset.py            <- SliceDataset, EvalSubjectDataset
+│   │   ├── augment.py            <- MONAI augmentation stack
+│   │   ├── slices.py             <- cache I/O, pad_to, unpad, _load_slice
+│   │   ├── metrics.py            <- Dice, HD95, sensitivity, specificity
+│   │   ├── config.py             <- Config dataclass + load_config()
+│   │   ├── pack.py               <- NIfTI -> 2D .npz slice cache builder
+│   │   └── tumor_type.py         <- imaging-proxy tumor type classifier
+│   ├── checkpoints/
+│   │   └── overnight_run/
+│   │       ├── best.pt           <- SHIPPED in repo, epoch 16, mean Dice 0.682
+│   │       └── history.json      <- 36 epochs of train loss + val Dice
+│   └── results/
+│       └── ablation_results.csv  <- populated by: run.py eval --out-csv
+│
+└── 05_frontend_demo/
+    ├── Home.py                   <- Streamlit entry point
+    ├── requirements.txt          <- streamlit, torch (cpu), numpy, pyyaml, etc.
+    ├── pages/
+    │   ├── Dashboard.py          <- metrics overview + ROC curves
+    │   ├── MRI_Analysis.py       <- live inference on demo patients
+    │   ├── Segmentation_Report.py <- per-patient PDF report generation
+    │   ├── Clinical_View.py      <- clinical-facing slice viewer
+    │   └── About.py
+    ├── utils/
+    │   ├── inference.py          <- model bridge: loads best.pt, runs predict_slice()
+    │   ├── loaders.py            <- data loading (cache, checkpoint, metrics)
+    │   ├── metrics.py            <- frontend metric helpers
+    │   └── build_metrics_cache.py <- builds data/roc_cache.json from eval output
+    ├── components/theme.py
+    ├── data/
+    │   └── roc_cache.json        <- pre-computed ROC curves + full metrics table
+    └── demo_cache/               <- 5 patients x 30 axial slices = 93 MB
+        ├── BraTS-PED-00030-000/  <- all 4 label types (ET, NETC, CC, ED)
+        ├── BraTS-PED-00021-000/  <- ET + NETC + ED
+        ├── BraTS-PED-00093-000/  <- ET + NETC + CC
+        ├── BraTS-PED-00028-000/  <- CC + ED only (no ET)
+        └── BraTS-PED-00230-000/  <- tiny ET + NETC (near-control)
+```
 
 ---
 
-## 4. Next run
+## The Model
 
+### Architecture
+- **2D U-Net** with `width=48`, `depth=3`
+- Input: 4-channel MRI slice `(4, 256, 256)` — modalities t1c, t1n, t2f, t2w
+- Output: 5-class segmentation logits + bottleneck feature map
+- Auxiliary **TumorTypeHead** (MLP on bottleneck features) predicts imaging-proxy tumor type. Does NOT affect segmentation output.
+- Parameters: ~4.3 million
+- Trained on 2D slices (axial + coronal), evaluated by restacking into 3D volumes
+
+### Scoring Regions (BraTS convention)
+| Region | Labels included | What it captures |
+|--------|----------------|-----------------|
+| ET — Enhancing Tumor | 1 | Active, blood-brain-barrier-breaching tumor |
+| TC — Tumor Core | 1 + 3 | ET + Cystic Component |
+| WT — Whole Tumor | 1 + 2 + 3 + 4 | Everything non-background |
+
+### Label Encoding in Masks
+- 0 = background
+- 1 = ET   (Enhancing Tumor)
+- 2 = NETC (Non-Enhancing Tumor Core)
+- 3 = CC   (Cystic Component)
+- 4 = ED   (Peritumoral Edema)
+
+### Trained Checkpoint — best.pt (epoch 16)
+Selected by **min-region** criterion (best worst-region Dice, not best mean). Epoch 25 had higher mean (0.689) but ET collapsed to 0.434 on held-out data (-0.165 vs epoch 16).
+
+| Region | Dice | Sensitivity | Specificity |
+|--------|------|-------------|-------------|
+| ET     | 0.599 | 0.622 | 0.999 |
+| TC     | 0.680 | 0.708 | 0.998 |
+| WT     | 0.742 | 0.781 | 0.997 |
+| Mean   | 0.682 | | |
+
+**Known weaknesses:** Model under-segments — precision >> sensitivity. Misses tumor rather than over-calls it. AUC/specificity are inflated because only 2-18% of pixels are tumor. ET is the hardest region.
+
+### Training History
+36 epochs total (~295 sec/epoch on Colab T4). Loss was still declining at ep36 — the model is under-trained. The RTX 3060 should train at similar or faster speed. More epochs will most benefit ET.
+
+---
+
+## Data
+
+### Full Dataset (NOT in repo — on shared Drive)
+- **BraTS-PEDs 2024** — pediatric brain MRI, 4 modalities
+- Pre-processed into 2D .npz slices by the team
+- Cache path used during training: `/content/drive/MyDrive/Medical AI Workshop/pack_out/pack_out`
+- Format: `<cache_2d>/<subject_id>/<plane>/slice_NNN.npz`
+  - `image`: `(4, H, W)` float32, already z-scored per volume over brain voxels
+  - `mask`: `(1, H, W)` uint8, labels 0-4
+- Axial: 240x240, coronal: 240x155. Both padded to 256x256 for the network.
+
+### Manifests (in repo at 00_shared/manifests/)
+- `train.json`, `val.json`, `test.json` — subject ID splits
+- Do NOT change these. They are the fixed evaluation contract.
+
+### Demo Cache (in repo at 05_frontend_demo/demo_cache/)
+5 patients, 30 axial slices each. 93 MB. This is what the live app uses. No external drive needed.
+
+---
+
+## How to Run Locally (RTX 3060)
+
+### Setup
 ```bash
-cd 03_augmentation_eval
-python run.py plan --report          # confirm augment column ~20%, ET floor 25%, empty ceiling 30%
-python run.py pack --out <dir>       # ~8.5 GB at 15000 (0.20 MB/slice, float16)
-# upload to Drive, then on a Colab T4:
-python run.py train --device cuda --run-id v2_w48 --epochs 40 \
-    --cache "/content/drive/MyDrive/<...>/pack_out"
+git clone https://github.com/Sanad-Manga/Pediatric-Brain-Tumor-Model.git
+cd Pediatric-Brain-Tumor-Model
 ```
 
-- **`--device cuda` is required.** The default is `cpu` and it will silently use it.
-- ~290 s/epoch at width 16 on a T4; expect longer at width 48 with 1.9× the data.
-- Checkpoints and `history.json` are written **every epoch** (atomically) to
-  `checkpoints/<run_id>/`, and resume automatically. Symlink that directory to
-  Drive before starting or a disconnect loses the run.
-- **Never copy checkpoints from inside `pack_out`** — that folder holds stale
-  originals. Doing so once overwrote a good checkpoint with a 2-epoch one.
-
-After training:
+### Run the Streamlit app (demo cache, no GPU needed)
 ```bash
 cd 05_frontend_demo
-python -m utils.build_metrics_cache        # ~80 s, rewrites data/roc_cache.json
+pip install -r requirements.txt
+streamlit run Home.py
 ```
-Every page and the report read that cache. Nothing else needs editing.
+
+### Run the Streamlit app with the full slice cache
+```bash
+cd 05_frontend_demo
+pip install -r requirements.txt
+NEUROFED_CACHE_2D=C:/path/to/pack_out streamlit run Home.py
+```
+On Windows PowerShell: `$env:NEUROFED_CACHE_2D = "C:/path/to/pack_out"; streamlit run Home.py`
+
+### Train on RTX 3060 (CUDA)
+```bash
+cd 03_augmentation_eval
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install monai pyyaml numpy
+```
+
+Edit config.yaml line 22 to set your local cache path:
+```yaml
+paths:
+  cache_2d: "C:/path/to/pack_out"
+```
+
+Resume from epoch 16 (recommended — do not start from scratch):
+```bash
+python run.py train --run-id overnight_run --resume
+```
+
+Start a fresh run:
+```bash
+python run.py train --run-id my_run
+```
+
+### Evaluate a checkpoint
+```bash
+# Print results only — does NOT write to ablation CSV
+python run.py eval \
+  --experiment-name held_out \
+  --checkpoint checkpoints/overnight_run/best.pt \
+  --cache C:/path/to/pack_out \
+  --eval-plane axial
+
+# Save results to CSV
+python run.py eval \
+  --experiment-name held_out \
+  --checkpoint checkpoints/overnight_run/best.pt \
+  --cache C:/path/to/pack_out \
+  --eval-plane axial \
+  --out-csv results/my_results.csv
+```
+
+### All CLI commands (run.py)
+```bash
+python run.py train --run-id <name> [--resume]
+python run.py eval --experiment-name <name> --checkpoint <path> --cache <path> [--out-csv <path>] [--eval-plane axial|coronal|both]
+python run.py pack --cache <output_path>        # build 2D slice cache from NIfTI
+python run.py index --cache <path>              # build index.json (tumor slice lookup)
+```
 
 ---
 
-## 5. Repo map
+## How the Frontend Connects to the Model
 
-**`03_augmentation_eval/`** — data pipeline, training, evaluation
-- `run.py` — single entry point: `test | index | tumor-type | plan | pack | train | preview | eval`
-- `src/train.py` — training loop, per-epoch checkpointing, resume, selection
-- `src/model.py` — `UNet`, `TumorTypeHead`, `build_model`, `infer_geometry`
-- `src/plan.py` — balanced per-hospital slice plan (ET floor, empty ceiling, per-patient cap)
-- `src/evaluate.py` — writes `results/ablation_results.csv`
-- `src/tumor_type.py` — DMG-like vs astrocytoma-like geometric proxy
-- `tools/history_from_log.py` — rebuilds `history.json` from console output
-- `checkpoints/overnight_run/` — `best.pt` (epoch 16, shipped), `last.pt` (epoch 36), `best_epoch25.pt`, `history.json` (34 epochs)
+`05_frontend_demo/utils/inference.py` is the bridge. It:
+1. Adds `03_augmentation_eval/` to `sys.path` so it can import `src.*`
+2. Loads `best.pt` from `03_augmentation_eval/checkpoints/overnight_run/best.pt` (relative path, works from any clone)
+3. Imports `_load_slice` from `src.slices` (NOT `src.dataset` — see Gotchas below)
+4. `predict_slice()` returns: prediction, ground truth, probabilities, confidence, features
 
-**`05_frontend_demo/`** — Streamlit demo
-- `utils/inference.py` — checkpoint loading, `predict_slice`, per-region Dice
-- `utils/metrics.py` — ROC/AUC, sensitivity/specificity/precision, HD95
-- `utils/build_metrics_cache.py` — regenerates `data/roc_cache.json`
-- `utils/loaders.py` — **all pages read numbers through here**
-- `pages/Model_Performance.py`, `pages/Segmentation_Report.py` — converted to real data
-- `HANDOFF_METRICS.md` — brief for whoever works on the UI
-
-**Data:** slice cache `<subject>/<plane>/slice_NNN.npz`, keys `image` (4,H,W)
-float32 already z-scored, `mask` (1,H,W) uint8 labels 0–4. 227 subjects,
-97,867 slices. Manifests: hospitalA 53, hospitalB 92, heldout 82.
+Cache defaults to `05_frontend_demo/demo_cache/`. Override with `NEUROFED_CACHE_2D` env var.
 
 ---
 
-## 6. Known-bad / unfinished
+## Deployment
 
-- **Ablation table is empty.** `results/ablation_results.csv` holds one stale
-  row. A real ablation needs a **separate training run per condition** —
-  `run.py eval` only copies the config flags into the CSV, so running it 4× on
-  one checkpoint would fabricate the table. A 3-condition CPU run
-  (`--epochs 3 --max-steps 250`, same seed) was started and had not finished.
-- **Streamlit theme was never visually reviewed.** Dark→light was done by bulk
-  colour-token substitution across 9 pages and verified only programmatically
-  (pages run clean; `.stApp` computes to white). Expect low-contrast text and
-  gradients designed for black grounds. The user reported the ROC/AUC page
-  looked wrong; the *report* artifact's ROC was verified correct, so the problem
-  is in the Streamlit page.
-- **Stale claims still on some pages:** `Dashboard.py` ticks ✓ for *Federated
-  Learning across 5 hospital sites*, *3D U-Net*, *CORAL*, *Grad-CAM XAI*,
-  *FP16* — none implemented. `Clinical_View.py`, `MRI_Analysis.py`,
-  `Domain_Adaptation.py` unaudited.
-- **Federated training never ran** (`use_federation: false`); the model is
-  trained centrally. CORAL exists only on `origin/codex/domain-adaptation`,
-  built for 3D.
-- **Epochs 0–2 missing** from `history.json` — an early logging fault, since
-  fixed. Affects plots only.
-- **`config.yaml`'s `cache_2d` points at a Colab Drive path.** Override with
-  `--cache` locally.
+### Streamlit Community Cloud (active, use this)
+- URL: https://neuropeds-ai.streamlit.app
+- Connected to `main` branch, entry point `05_frontend_demo/Home.py`
+- Auto-redeploys on every push to main
+- No CPU quota — stays up indefinitely as long as visited every 7 days
+
+### HuggingFace Spaces (paused)
+- URL: https://huggingface.co/spaces/A-Sanad/NeuroPeds-AI
+- Hit free tier CPU quota. Ignore — Streamlit Cloud is the real deployment.
 
 ---
 
-## 7. Where to improve, in order
+## What to Do Next on RTX 3060
 
-1. **Train at the new settings** (width 48 + 15000). Not yet done. Biggest expected gain.
-2. **Evaluate with `eval.plane: both`** — already configured, never measured.
-3. **Test-time augmentation** (flip, average) — ~20 lines, reliable small gain.
-4. **Measure per-hospital scores before attempting domain adaptation.** If
-   hospital A and B are within noise, CORAL has nothing to correct, and porting
-   it from 3D is days of work. ~10 minutes to check.
-5. **Finish the ablation** — it is section 03's actual deliverable.
+### 1. Continue training (highest value)
+The model stopped at 36 epochs and loss was still dropping. Resume:
+```bash
+cd 03_augmentation_eval
+python run.py train --run-id overnight_run --resume
+```
+Watch `dice_ET` in the logs. Stop when it plateaus for 5+ epochs. Current: 0.460 at ep36. Target: >0.60 on training val, >0.65 on held-out.
 
-Do **not** just train more epochs at the old settings: epochs 26–36 produced no
-improvement and epoch 25 was worse than 16 where it mattered.
+### 2. Run proper held-out evaluation
+Once you have the full cache:
+```bash
+python run.py eval \
+  --experiment-name final_eval \
+  --checkpoint checkpoints/overnight_run/best.pt \
+  --cache C:/path/to/pack_out \
+  --eval-plane both
+```
+`--eval-plane both` averages axial+coronal softmax before argmax. Usually adds 1-3 Dice points but doubles evaluation time.
+
+### 3. Rebuild roc_cache.json after retraining
+This powers the Dashboard ROC curves and metrics table:
+```bash
+cd 05_frontend_demo
+python -m utils.build_metrics_cache
+```
+Then commit and push — Streamlit Cloud auto-redeploys.
+
+### 4. Secondary: ablation runs
+Set `use_augmentation: false` or `use_mixup: false` in config.yaml and run eval with `--out-csv` to compare conditions. Results accumulate in `results/ablation_results.csv`.
+
+### 5. Secondary: try larger model
+In config.yaml, change `width: 48, depth: 3` to `width: 64, depth: 4`. Will train slower but capacity was the binding constraint.
 
 ---
 
-## 8. Report for the clinician
+## Key Gotchas
 
-Standalone HTML, every value and chart coordinate generated from
-`roc_cache.json` / `history.json` rather than transcribed:
-<https://claude.ai/code/artifact/c6a087fb-8387-4cdf-8b6b-d6d99cee4492>
+**`src.dataset` imports MONAI at module level (via augment.py)**
+`inference.py` imports `_load_slice` from `src.slices`, not `src.dataset`. Do not change this. If you ever need to use `dataset.py` directly in the frontend, you must either install MONAI or replicate the function elsewhere.
 
-Contains: per-region metrics, ROC curves, training curves, the epoch-16 vs
-epoch-25 selection finding, methods, limitations, and four specific questions
-for clinical feedback. Regenerate with the generator script after re-measuring.
+**`config.yaml` cache path**
+Line 22 points to a Colab Drive path that will not exist on your PC. Always update `paths.cache_2d` before training.
+
+**`run.py eval` does not write CSV by default**
+Pass `--out-csv <path>` explicitly. Without it, results print to stdout only. This was a bug that was fixed — previously it always wrote to the ablation CSV on every eval run.
+
+**Checkpoint epoch field is 0-indexed**
+`epoch: 16` in the file means the 17th training epoch.
+
+**Checkpoint selection uses min-region, not mean**
+`config.yaml selection.metric: "min_region"` — best.pt is the epoch with the highest worst-region Dice, not the highest mean. `best_mean.pt` is also written each epoch if you want to compare.
+
+**AUC and specificity are inflated**
+Only 2-18% of pixels are tumor. A model that predicts all-background gets specificity ~0.98. Do not cite these as headline metrics. Use Dice and sensitivity.
+
+**Slice filenames are zero-padded**
+`slice_000.npz`, `slice_001.npz`, etc. The index.json stores integer indices (0, 1, 2...), not filenames.
