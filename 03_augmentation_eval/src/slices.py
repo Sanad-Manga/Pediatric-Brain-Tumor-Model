@@ -106,7 +106,16 @@ def load_slice(cache_dir, subject_id: str, plane: str, slice_index: int) -> dict
     path = slice_path(cache_dir, subject_id, plane, slice_index)
     if not path.exists():
         raise FileNotFoundError(f"slice file not found: {path}")
-    with np.load(path, allow_pickle=False) as npz:
+    try:
+        handle = np.load(path, allow_pickle=False)
+    except (ValueError, OSError, EOFError) as exc:
+        # An unreadable slice is reported as an absent one. `run.py index`
+        # already skips these, so a cache can legitimately contain a corrupt
+        # file; every caller here handles a missing slice, and none handled a
+        # corrupt one -- a single bad file out of ~55k used to abort a whole
+        # held-out evaluation.
+        raise FileNotFoundError(f"unreadable slice file: {path} ({exc})") from exc
+    with handle as npz:
         missing = {"image", "mask"} - set(npz.files)
         if missing:
             raise ValueError(

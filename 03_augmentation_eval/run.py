@@ -188,6 +188,8 @@ def cmd_train(args) -> int:
         resume=not args.no_resume,
         amp=args.amp,
         num_workers=args.num_workers,
+        patience=args.patience,
+        deadline_unix=args.deadline_unix,
     )
     ckpt = Path(summary["checkpoint_dir"])
     print(f"\nbest mean_dice: {summary['best_mean_dice']}")
@@ -371,6 +373,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="DataLoader worker processes; 2-4 helps on Colab")
     p_train.add_argument("--no-resume", action="store_true",
                          help="ignore an existing checkpoint and start fresh")
+    p_train.add_argument("--patience", type=int, default=None,
+                         help="stop after N epochs with no selection-metric gain")
+    p_train.add_argument("--deadline-unix", type=float, default=None,
+                         help="hard wall-clock stop (unix seconds); no epoch is "
+                              "started that is not expected to finish in time")
     for flag in ("use-augmentation", "use-mixup"):
         dest = flag.replace("-", "_")
         p_train.add_argument(f"--{flag}", dest=dest, action="store_true", default=None)

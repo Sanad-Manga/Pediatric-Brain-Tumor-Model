@@ -255,7 +255,6 @@ def run(
     device: str = "cpu",
     tmp_dir: Path | None = None,
     subjects: list | None = None,
-    write_csv: bool = True,
 ) -> dict:
     """Evaluate one configuration and append its row. Returns the written row."""
     if checkpoint is None and not dummy_checkpoint:

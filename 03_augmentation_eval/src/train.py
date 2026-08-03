@@ -177,14 +177,30 @@ def run(
     resume: bool = True,
     amp: bool | None = None,
     num_workers: int = 0,
+    patience: int | None = None,
+    deadline_unix: float | None = None,
 ) -> dict:
     """Train, validating per patient each epoch. Returns the run summary.
 
     ``amp`` defaults to on for CUDA and is forced off elsewhere: fp16 autocast
     needs tensor cores to be a win, and on CPU it is a slowdown. The T4 this
     trains on has them, and they were sitting idle for every run before this.
+
+    ``patience`` stops the run when the selection score has not improved for
+    that many consecutive epochs. ``deadline_unix`` is a hard wall-clock stop:
+    the loop refuses to *begin* an epoch it does not expect to finish in time,
+    so an unattended run always exits cleanly rather than being killed
+    mid-checkpoint. Both are off when None, which is the pre-existing behaviour.
     """
     torch.manual_seed(seed)
+    # Fail loudly rather than silently training on CPU for hours. A CUDA device
+    # that torch cannot see is always a broken environment, never something to
+    # quietly work around.
+    if str(device).startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            f"device={device!r} requested but torch.cuda.is_available() is False "
+            f"(torch {torch.__version__}). Refusing to fall back to CPU."
+        )
     use_amp = bool(str(device).startswith("cuda") and (amp is None or amp))
     if amp and not str(device).startswith("cuda"):
         LOGGER.warning("--amp ignored: it needs CUDA, and device is %r", device)
@@ -257,6 +273,8 @@ def run(
         LOGGER.info("cosine LR decay: %.1e -> %.1e over %d epochs", lr, cfg.min_lr, epochs)
 
     start_epoch, best, best_mean = 0, -1.0, -1.0
+    best_epoch = -1
+    stop_state = {"reason": None}
     last_path = ckpt_dir / "last.pt"
     if resume and last_path.exists():
         payload = torch.load(last_path, map_location=device, weights_only=False)
@@ -268,6 +286,10 @@ def run(
             scaler.load_state_dict(payload["scaler_state_dict"])
         start_epoch = int(payload.get("epoch", 0)) + 1
         best = float(payload.get("best_mean_dice", -1.0))
+        # The epoch that set `best` is not carried on the checkpoint, so the
+        # patience clock restarts here rather than resuming mid-count. Erring
+        # towards training longer is the safe direction after a restart.
+        best_epoch = start_epoch - 1
         LOGGER.info("resumed from %s at epoch %d", last_path, start_epoch)
         for _ in range(start_epoch):        # keep the LR curve aligned on resume
             if scheduler is not None:
@@ -297,7 +319,12 @@ def run(
                    "epochs_completed": len(history), "completed": done,
                    "best_mean_dice": round(best, 4), "val_subjects": val_subjects,
                    "train_entries": len(train_entries), "history": history,
-                   "checkpoint_dir": str(ckpt_dir)}
+                   "checkpoint_dir": str(ckpt_dir),
+                   # Why the loop ended, so an unattended orchestrator can tell a
+                   # genuine plateau from "ran out of clock" and budget the rest
+                   # of the night accordingly.
+                   "stop_reason": stop_state["reason"], "best_epoch": best_epoch,
+                   "width": cfg.model_width, "depth": cfg.model_depth}
         tmp = history_path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)
@@ -378,6 +405,7 @@ def run(
         save_checkpoint(last_path, model, optimizer, epoch, max(best, score), cfg, **ckpt_kw)
         if score > best:
             best = score
+            best_epoch = epoch
             save_checkpoint(ckpt_dir / "best.pt", model, optimizer, epoch, best, cfg, **ckpt_kw)
             LOGGER.info("  new best by %s: %.4f (epoch %d)", cfg.selection_metric, best, epoch)
         if mean_dice > best_mean:
@@ -388,6 +416,27 @@ def run(
             scheduler.step()
             record["lr"] = round(optimizer.param_groups[0]["lr"], 8)
         write_history(done=False)
+
+        # Unattended stop conditions. Both are checked only after this epoch's
+        # checkpoint and history are already on disk, so stopping can never cost
+        # an epoch of work.
+        if deadline_unix:
+            # Worst of the last three epochs, not the mean: over-estimating the
+            # next epoch costs one skipped epoch, under-estimating overruns a
+            # deadline that exists because someone needs the GPU back.
+            recent = [r["seconds"] for r in history[-3:] if r.get("seconds")]
+            est = max(recent) if recent else 0.0
+            if time.time() + est >= deadline_unix:
+                LOGGER.warning("stopping after epoch %d: another epoch (~%.0fs) would "
+                               "not finish before the deadline", epoch, est)
+                stop_state["reason"] = "deadline"
+                break
+        if patience and best_epoch >= 0 and (epoch - best_epoch) >= patience:
+            LOGGER.info("stopping after epoch %d: no %s improvement for %d epochs "
+                        "(best %.4f at epoch %d)",
+                        epoch, cfg.selection_metric, patience, best, best_epoch)
+            stop_state["reason"] = "plateau"
+            break
 
     write_history(done=True)
     with open(history_path, "r", encoding="utf-8") as fh:
