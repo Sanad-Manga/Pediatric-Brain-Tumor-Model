@@ -93,6 +93,8 @@ Streamlit reruns the whole script on every widget interaction.
 
 ### Files with known remaining problems — **this is your job**
 
+> **Status update (2026-09):** the claims listed below for `Dashboard.py`, `Clinical_View.py`, `About.py` and `Home.py` (HIPAA/GDPR, "257 analyzed scans", "~45s", "70% accuracy", DICOM/NIfTI, 3D U-Net, FedAvg/5 hospital nodes, CORAL "0.684 → 0.042", Grad-CAM/attention/uncertainty maps) have been corrected or removed; the pages now say what is true (2D U-Net ensemble, 82 held-out patients, 0.754 mean Dice, research use only, explainability not implemented). The table is kept as history. `MRI_Analysis.py` still draws a labelled synthetic placeholder when no patient is loaded. The pages `Model_Intelligence.py` and `Domain_Adaptation.py` named below no longer exist on `main`.
+
 | File | Issue |
 |---|---|
 | `pages/Dashboard.py` | "Research Contributions" section still ticks ✓ for *Federated Learning across 5 hospital sites*, *3D U-Net*, *CORAL Domain Adaptation*, *Explainable AI (Grad-CAM)*, *Mixed Precision FP16*. **None of these are implemented or run in this repo.** Dataset summary still says "Volume Shape 96 × 96 × 96" and "Precision FP16 Mixed" — real is 240×240 2D slices, float32 training. "Subjects 257" — the manifests cover 227 (53+92+82). |
