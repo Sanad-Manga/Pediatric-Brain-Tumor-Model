@@ -45,6 +45,37 @@ LABEL_NAMES = {
 DEFAULT_CHECKPOINT = _SECTION_03 / "checkpoints" / "overnight_run" / "best.pt"
 
 
+class EnsembleModel(torch.nn.Module):
+    """Averages member models' softmax probabilities, not their logits or
+    weights -- logit scales aren't comparable across independently-trained
+    models, and probability averaging is what was actually measured (a real
+    +0.027 mean Dice gain over the better individual model on held-out data).
+
+    Satisfies the same ``model(x) -> (seg_logits, features)`` contract every
+    caller (predict_slice, evaluate.py's predict_slices, build_metrics_cache)
+    already uses: returns ``log(avg_probs)`` as "logits" so a caller's own
+    ``softmax(...)`` recovers ``avg_probs`` exactly, without every call site
+    needing to know an ensemble is even involved.
+    """
+
+    def __init__(self, members: list[torch.nn.Module]):
+        super().__init__()
+        self.members = torch.nn.ModuleList(members)
+
+    def forward(self, x):
+        probs_sum = None
+        first_features = None
+        for i, member in enumerate(self.members):
+            logits, features = member(x)
+            probs = torch.softmax(logits, dim=1)
+            probs_sum = probs if probs_sum is None else probs_sum + probs
+            if i == 0:
+                first_features = features
+        avg_probs = probs_sum / len(self.members)
+        log_probs = torch.log(avg_probs.clamp_min(1e-12))
+        return log_probs, first_features
+
+
 def default_config(cache_dir: str | Path | None = None):
     """Section 03's config, optionally with the slice cache path overridden.
 
@@ -71,6 +102,22 @@ def checkpoint_metadata(checkpoint_path: str | Path) -> dict:
             f"  train one with: python run.py train --run-id <id>"
         )
     payload = torch.load(path, map_location="cpu", weights_only=False)
+    if payload.get("ensemble"):
+        # epoch/epochs_completed don't mean anything for a blend of two
+        # independently-trained checkpoints -- -1 rather than a made-up
+        # number, consistent with this module's rule against invented values.
+        return {
+            "path": str(path),
+            "epoch": -1,
+            "epochs_completed": len(payload.get("members", [])),
+            "best_mean_dice": payload.get("best_mean_dice"),
+            "architecture": "ensemble",
+            "spatial_dims": int(payload.get("spatial_dims", 2)),
+            "use_augmentation": None,
+            "use_mixup": None,
+            "has_type_head": False,
+            "ensemble_member_paths": payload.get("member_paths", []),
+        }
     return {
         "path": str(path),
         "epoch": int(payload.get("epoch", -1)),
@@ -98,6 +145,19 @@ def load_model(checkpoint_path: str | Path = DEFAULT_CHECKPOINT,
     cfg = default_config(cache_dir)
 
     payload = torch.load(path, map_location=device, weights_only=False)
+
+    if payload.get("ensemble"):
+        members = []
+        for member_payload in payload["members"]:
+            geom = {k: member_payload[k] for k in ("width", "depth") if k in member_payload}
+            if not geom:
+                geom = infer_geometry(member_payload["model_state_dict"])
+            m = build_model(cfg, spatial_dims=meta["spatial_dims"], **geom)
+            m.load_state_dict(member_payload["model_state_dict"])
+            members.append(m)
+        model = EnsembleModel(members).to(device).eval()
+        return model, None, cfg, meta
+
     # Build at the checkpoint's own geometry, not the config's -- config.model
     # may have changed since this checkpoint was trained.
     geom = {k: payload[k] for k in ("width", "depth") if k in payload}

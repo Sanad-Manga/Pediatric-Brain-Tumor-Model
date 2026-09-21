@@ -133,7 +133,8 @@ def validate(model, subjects, cfg: Config, cache_dir, device="cpu",
 
 
 def save_checkpoint(path: Path, model, optimizer, epoch: int, best: float, cfg: Config,
-                    type_head=None, scaler=None, val_subjects=None) -> Path:
+                    type_head=None, scaler=None, val_subjects=None,
+                    lr_horizon: int | None = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "model_state_dict": model.state_dict(),
@@ -149,6 +150,11 @@ def save_checkpoint(path: Path, model, optimizer, epoch: int, best: float, cfg: 
         "use_augmentation": cfg.use_augmentation,
         "use_mixup": cfg.use_mixup,
     }
+    if lr_horizon is not None:
+        # The cosine schedule's T_max, fixed at first training and reused on
+        # every resume regardless of that session's --epochs -- see run()'s
+        # docstring for why this stopped being derivable from --epochs alone.
+        payload["lr_horizon"] = lr_horizon
     if type_head is not None:
         payload["type_head_state_dict"] = type_head.state_dict()
     if scaler is not None and scaler.is_enabled():
@@ -177,14 +183,48 @@ def run(
     resume: bool = True,
     amp: bool | None = None,
     num_workers: int = 0,
+    patience: int | None = None,
+    deadline_unix: float | None = None,
+    lr_horizon: int | None = None,
 ) -> dict:
     """Train, validating per patient each epoch. Returns the run summary.
 
     ``amp`` defaults to on for CUDA and is forced off elsewhere: fp16 autocast
     needs tensor cores to be a win, and on CPU it is a slowdown. The T4 this
     trains on has them, and they were sitting idle for every run before this.
+
+    ``patience`` stops the run when the selection score has not improved for
+    that many consecutive epochs. ``deadline_unix`` is a hard wall-clock stop:
+    the loop refuses to *begin* an epoch it does not expect to finish in time,
+    so an unattended run always exits cleanly rather than being killed
+    mid-checkpoint. Both are off when None, which is the pre-existing behaviour.
+
+    ``lr_horizon`` is the epoch count the cosine schedule decays over -- a
+    SEPARATE concept from ``epochs`` (which only bounds how many epochs this
+    one process runs). Get this wrong across a resumed, multi-session run and
+    the LR never actually reaches the fine-convergence phase cosine annealing
+    exists for: every previous version of this function rebuilt
+    ``CosineAnnealingLR(T_max=epochs)`` fresh on each resume, so a run resumed
+    with a *different* ``--epochs`` value silently re-stretched the decay
+    horizon and the LR jumped back up instead of continuing to fall. Observed
+    live: LR reached ``1e-5`` by epoch 3 of a planned 4-epoch run, then jumped
+    to ``1.5e-4`` at epoch 4 when the next session resumed with ``--epochs
+    40``, and stayed in that elevated, barely-decaying regime through epoch
+    20+ across three more resumes -- 16+ epochs that never got a real chance
+    to settle. Once training starts, the horizon is fixed: it is read from the
+    checkpoint on every resume and this argument is ignored, so a hurried
+    ``--epochs`` choice under deadline pressure in some future session cannot
+    silently re-open a schedule that already started closing.
     """
     torch.manual_seed(seed)
+    # Fail loudly rather than silently training on CPU for hours. A CUDA device
+    # that torch cannot see is always a broken environment, never something to
+    # quietly work around.
+    if str(device).startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            f"device={device!r} requested but torch.cuda.is_available() is False "
+            f"(torch {torch.__version__}). Refusing to fall back to CPU."
+        )
     use_amp = bool(str(device).startswith("cuda") and (amp is None or amp))
     if amp and not str(device).startswith("cuda"):
         LOGGER.warning("--amp ignored: it needs CUDA, and device is %r", device)
@@ -248,18 +288,42 @@ def run(
     # resume take a badly-scaled gradient.
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
+    start_epoch, best, best_mean = 0, -1.0, -1.0
+    best_epoch = -1
+    stop_state = {"reason": None}
+    last_path = ckpt_dir / "last.pt"
+
+    # Peek the checkpoint BEFORE building the scheduler: the decay horizon has
+    # to come from where training actually started, not from whatever
+    # --epochs this particular resume happens to pass.
+    resume_payload = None
+    if resume and last_path.exists():
+        resume_payload = torch.load(last_path, map_location=device, weights_only=False)
+        effective_lr_horizon = resume_payload.get("lr_horizon")
+        if effective_lr_horizon is None:
+            # Checkpoint predates this field -- best available guess is the
+            # epoch it already reached plus what this call asked for, which
+            # can still under-decay once, but never worse than the old bug.
+            effective_lr_horizon = max(lr_horizon or epochs,
+                                       int(resume_payload.get("epoch", 0)) + 1)
+            LOGGER.warning("checkpoint has no saved lr_horizon (pre-fix run); "
+                           "using %d -- the schedule may still be misaligned "
+                           "for this run", effective_lr_horizon)
+    else:
+        effective_lr_horizon = lr_horizon if lr_horizon is not None else epochs
+
     # Fixed lr made validation Dice oscillate late in the run; decay it so the
     # last epochs can settle instead of stepping over the minimum.
     scheduler = None
     if cfg.lr_schedule == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max(epochs, 1), eta_min=cfg.min_lr)
-        LOGGER.info("cosine LR decay: %.1e -> %.1e over %d epochs", lr, cfg.min_lr, epochs)
+            optimizer, T_max=max(effective_lr_horizon, 1), eta_min=cfg.min_lr)
+        LOGGER.info("cosine LR decay: %.1e -> %.1e over %d epochs (horizon fixed "
+                    "at first training, immune to --epochs on later resumes)",
+                    lr, cfg.min_lr, effective_lr_horizon)
 
-    start_epoch, best, best_mean = 0, -1.0, -1.0
-    last_path = ckpt_dir / "last.pt"
-    if resume and last_path.exists():
-        payload = torch.load(last_path, map_location=device, weights_only=False)
+    if resume_payload is not None:
+        payload = resume_payload
         model.load_state_dict(payload["model_state_dict"])
         if type_head is not None and "type_head_state_dict" in payload:
             type_head.load_state_dict(payload["type_head_state_dict"])
@@ -268,9 +332,21 @@ def run(
             scaler.load_state_dict(payload["scaler_state_dict"])
         start_epoch = int(payload.get("epoch", 0)) + 1
         best = float(payload.get("best_mean_dice", -1.0))
+        # The epoch that set `best` is not carried on the checkpoint, so the
+        # patience clock restarts here rather than resuming mid-count. Erring
+        # towards training longer is the safe direction after a restart.
+        best_epoch = start_epoch - 1
         LOGGER.info("resumed from %s at epoch %d", last_path, start_epoch)
-        for _ in range(start_epoch):        # keep the LR curve aligned on resume
-            if scheduler is not None:
+        if scheduler is not None:
+            # load_state_dict() just put the checkpoint's ALREADY-DECAYED lr back
+            # on the optimizer, and CosineAnnealingLR's step() is a recursion on
+            # the current lr -- replaying from there decays it a second time and
+            # every resume lands below the intended curve. Restart the replay
+            # from the base lr so it reproduces exactly what a single unbroken
+            # run would have had.
+            for group, base_lr in zip(optimizer.param_groups, scheduler.base_lrs):
+                group["lr"] = base_lr
+            for _ in range(start_epoch):    # keep the LR curve aligned on resume
                 scheduler.step()
 
     # Carry forward any history from a previous run of this run_id, so resuming
@@ -297,7 +373,12 @@ def run(
                    "epochs_completed": len(history), "completed": done,
                    "best_mean_dice": round(best, 4), "val_subjects": val_subjects,
                    "train_entries": len(train_entries), "history": history,
-                   "checkpoint_dir": str(ckpt_dir)}
+                   "checkpoint_dir": str(ckpt_dir),
+                   # Why the loop ended, so an unattended orchestrator can tell a
+                   # genuine plateau from "ran out of clock" and budget the rest
+                   # of the night accordingly.
+                   "stop_reason": stop_state["reason"], "best_epoch": best_epoch,
+                   "width": cfg.model_width, "depth": cfg.model_depth}
         tmp = history_path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)
@@ -308,6 +389,7 @@ def run(
         if type_head is not None:
             type_head.train()
         losses, type_losses, t0 = [], [], time.time()
+        skipped_nonfinite = 0
 
         for step, batch in enumerate(loader):
             if max_steps_per_epoch and step >= max_steps_per_epoch:
@@ -335,11 +417,28 @@ def run(
                     loss = loss + cfg.tumor_type_loss_weight * type_loss
                     type_losses.append(float(type_loss.detach()))
 
+            # A non-finite loss (seen live: fp16 overflow under AMP, class-weighted
+            # CE on a degenerate batch) corrupts every weight it touches, and once
+            # a weight is NaN it stays NaN forever -- an entire overnight run was
+            # lost this way. Skip the step rather than let one bad batch poison
+            # every epoch after it; the next batch is independent.
+            if not torch.isfinite(loss):
+                skipped_nonfinite += 1
+                optimizer.zero_grad(set_to_none=True)
+                continue
+
             optimizer.zero_grad(set_to_none=True)
             # With AMP off, scaler is a documented no-op passthrough, so this is
-            # the same three operations as the plain loss.backward()/step() it
+            # the same four operations as the plain loss.backward()/step() it
             # replaces -- there is no separate non-AMP code path to keep in sync.
             scaler.scale(loss).backward()
+            # Clip in the *unscaled* gradient space -- unscale_ must run before
+            # clip_grad_norm_ or the threshold is being compared against
+            # gradients still multiplied by the AMP loss scale (commonly ~65536),
+            # making the clip a no-op. A no-op with AMP off too, since scaler is a
+            # passthrough there.
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
             losses.append(float(loss.detach()))
@@ -357,6 +456,10 @@ def run(
                   **{k: round(v, 4) for k, v in val.items()}}
         if type_losses:
             record["type_loss"] = round(float(np.mean(type_losses)), 4)
+        if skipped_nonfinite:
+            record["skipped_nonfinite"] = skipped_nonfinite
+            LOGGER.warning("  epoch %d: skipped %d non-finite batch(es)",
+                           epoch, skipped_nonfinite)
         history.append(record)
 
         line = (f"epoch {epoch}: loss={record['loss']:.4f}  val "
@@ -374,10 +477,12 @@ def run(
         record["min_region_dice"] = round(min_region, 4)
         score = min_region if cfg.selection_metric == "min_region" else mean_dice
 
-        ckpt_kw = {"type_head": type_head, "scaler": scaler, "val_subjects": val_subjects}
+        ckpt_kw = {"type_head": type_head, "scaler": scaler, "val_subjects": val_subjects,
+                  "lr_horizon": effective_lr_horizon}
         save_checkpoint(last_path, model, optimizer, epoch, max(best, score), cfg, **ckpt_kw)
         if score > best:
             best = score
+            best_epoch = epoch
             save_checkpoint(ckpt_dir / "best.pt", model, optimizer, epoch, best, cfg, **ckpt_kw)
             LOGGER.info("  new best by %s: %.4f (epoch %d)", cfg.selection_metric, best, epoch)
         if mean_dice > best_mean:
@@ -388,6 +493,27 @@ def run(
             scheduler.step()
             record["lr"] = round(optimizer.param_groups[0]["lr"], 8)
         write_history(done=False)
+
+        # Unattended stop conditions. Both are checked only after this epoch's
+        # checkpoint and history are already on disk, so stopping can never cost
+        # an epoch of work.
+        if deadline_unix:
+            # Worst of the last three epochs, not the mean: over-estimating the
+            # next epoch costs one skipped epoch, under-estimating overruns a
+            # deadline that exists because someone needs the GPU back.
+            recent = [r["seconds"] for r in history[-3:] if r.get("seconds")]
+            est = max(recent) if recent else 0.0
+            if time.time() + est >= deadline_unix:
+                LOGGER.warning("stopping after epoch %d: another epoch (~%.0fs) would "
+                               "not finish before the deadline", epoch, est)
+                stop_state["reason"] = "deadline"
+                break
+        if patience and best_epoch >= 0 and (epoch - best_epoch) >= patience:
+            LOGGER.info("stopping after epoch %d: no %s improvement for %d epochs "
+                        "(best %.4f at epoch %d)",
+                        epoch, cfg.selection_metric, patience, best, best_epoch)
+            stop_state["reason"] = "plateau"
+            break
 
     write_history(done=True)
     with open(history_path, "r", encoding="utf-8") as fh:

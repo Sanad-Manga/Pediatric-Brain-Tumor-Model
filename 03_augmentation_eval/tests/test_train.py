@@ -85,6 +85,32 @@ def test_resume_picks_up_after_the_last_completed_epoch(cfg, cache, tmp_path):
     assert epochs == [0, 1], f"expected a continued curve, got {epochs}"
 
 
+def test_cosine_horizon_is_fixed_at_first_training_not_rebuilt_on_resume(cfg, cache, tmp_path):
+    """Regression: T_max used to be rebuilt from each session's --epochs.
+
+    Every resumed session then re-stretched the cosine decay, so a run that had
+    fully annealed jumped back up to a high LR and never converged (16+ epochs
+    lost on s1b_w64_d3). The horizon now rides on the checkpoint, and a resume
+    with a different --epochs must continue the SAME curve.
+    """
+    cfg.schedule = {**cfg.schedule, "kind": "cosine", "min_lr": 1e-6}
+    ckpt_dir = tmp_path / "ckpt"
+    _run(cfg, cache, ckpt_dir, epochs=2, lr_horizon=4)
+    payload = torch.load(ckpt_dir / "last.pt", map_location="cpu", weights_only=False)
+    assert payload["lr_horizon"] == 4
+
+    # Resume asking for a different --epochs, no --lr-horizon: must not restretch.
+    summary = _run(cfg, cache, ckpt_dir, epochs=3)
+    lrs = [r["lr"] for r in summary["history"]]
+    assert len(lrs) == 3
+    assert lrs == sorted(lrs, reverse=True), f"LR must keep decaying across the resume: {lrs}"
+
+    # And it must be the horizon-4 curve, not a fresh horizon-3 one.
+    reference = tmp_path / "ref"
+    ref = _run(cfg, cache, reference, epochs=3, lr_horizon=4)
+    assert lrs == [r["lr"] for r in ref["history"]]
+
+
 def test_history_survives_a_run_that_stops_early(cfg, cache, tmp_path):
     """History is written per epoch; a stopped run must not lose the curve."""
     ckpt_dir = tmp_path / "ckpt"

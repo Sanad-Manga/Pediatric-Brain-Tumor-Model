@@ -119,14 +119,28 @@ class EvalSubjectDataset(Dataset):
             )
 
         images, labels, pads = [], [], []
+        kept: list[int] = []
         orig_shape = None
         for i in indices:
-            image, label, pad, orig_shape = _load_slice(
-                self.cache_dir, self.cfg, subject_id, plane, i
-            )
+            try:
+                image, label, pad, orig_shape = _load_slice(
+                    self.cache_dir, self.cfg, subject_id, plane, i
+                )
+            except FileNotFoundError:
+                # Drop the slice and its index together. Restacking positions a
+                # slice by its recorded index, so omitting both keeps the
+                # prediction volume aligned with ground truth -- losing one
+                # slice of a subject is survivable, losing the subject is not.
+                continue
             images.append(image)
             labels.append(label[0])
             pads.append(pad)
+            kept.append(i)
+
+        if not kept:
+            raise FileNotFoundError(
+                f"no readable slices for {subject_id}/{plane} under {self.cache_dir}"
+            )
 
         return {
             "subject_id": subject_id,
@@ -135,8 +149,8 @@ class EvalSubjectDataset(Dataset):
             "labels": np.stack(labels, axis=0),      # (N, H, W) padded
             "pad": pads[0],
             "orig_shape": orig_shape,
-            "slice_indices": indices,
-            "n_slices": len(indices),
+            "slice_indices": kept,
+            "n_slices": len(kept),
         }
 
 
