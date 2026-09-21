@@ -190,6 +190,7 @@ def cmd_train(args) -> int:
         num_workers=args.num_workers,
         patience=args.patience,
         deadline_unix=args.deadline_unix,
+        lr_horizon=args.lr_horizon,
     )
     ckpt = Path(summary["checkpoint_dir"])
     print(f"\nbest mean_dice: {summary['best_mean_dice']}")
@@ -375,6 +376,10 @@ def build_parser() -> argparse.ArgumentParser:
                          help="ignore an existing checkpoint and start fresh")
     p_train.add_argument("--patience", type=int, default=None,
                          help="stop after N epochs with no selection-metric gain")
+    p_train.add_argument("--lr-horizon", type=int, default=None,
+                         help="cosine LR decay horizon in epochs; fixed at first "
+                              "training and reused on every resume regardless of "
+                              "--epochs (default: --epochs, on a fresh run only)")
     p_train.add_argument("--deadline-unix", type=float, default=None,
                          help="hard wall-clock stop (unix seconds); no epoch is "
                               "started that is not expected to finish in time")

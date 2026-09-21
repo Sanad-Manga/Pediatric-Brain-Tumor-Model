@@ -107,6 +107,29 @@ Selected by **min-region** criterion (best worst-region Dice, not best mean). Ep
 
 **Known weaknesses:** Model under-segments — precision >> sensitivity. Misses tumor rather than over-calls it. AUC/specificity are inflated because only 2-18% of pixels are tumor. ET is the hardest region.
 
+### Current Shipped Checkpoint — ENSEMBLE (supersedes the epoch-16 section above)
+`03_augmentation_eval/checkpoints/overnight_run/best.pt` is now an **ensemble file**: the original exhibition model (width 16, depth 3) plus a wider continued-training model (`s1b_w64_d3`, width 64, depth 3, epoch 17). Their **softmax probabilities are averaged** (not weights, not logits). Both members' weights are embedded in the file, so it is self-contained; the original epoch-16 weights are also recoverable from git history.
+
+Held-out evaluation (82 subjects, `--eval-plane both`, this repo's `evaluate.py` regions):
+
+| Model | ET | NC | WT | Mean |
+|-------|-----|-----|-----|------|
+| Original exhibition (w16 d3) | – | – | – | 0.7101 |
+| s1b_w64_d3 epoch 17 alone | 0.5167 | 0.8208 | 0.8437 | 0.7271 |
+| **Ensemble (shipped)** | **0.5808** | **0.8277** | **0.8536** | **0.7541** |
+
+The ensemble beats both members on every region — errors of the two models are largely uncorrelated. **Do not compare these numbers with the table above**: `evaluate.py` defines `NC = labels {1,2,3}`, whereas the table above uses `TC = {1,3}`, and the older figures were not measured with `--eval-plane both`.
+
+How the app loads it: `05_frontend_demo/utils/inference.py` has an `EnsembleModel` wrapper that returns `log(mean softmax)` as "logits", so every downstream `softmax()` recovers the averaged probabilities without knowing an ensemble is involved. `checkpoint_metadata()` / `load_model()` detect `payload["ensemble"]`. `run.py eval` cannot score an ensemble file; use `overnight/score_ensemble_cli.py <ckpt1> <ckpt2> ...`. Rebuild the file with `overnight/build_ensemble_checkpoint.py`.
+
+**Lessons from this round (read before training again):**
+- **Never trust `--eval-plane axial` for a promotion decision.** An axial-only win was promoted once and reversed by the both-plane re-check. Always confirm with `--eval-plane both`.
+- **Cosine LR schedule bug (fixed).** `T_max` was rebuilt from each session's `--epochs`, so every resume re-stretched the decay and the model never converged. `--lr-horizon N` is now fixed on the first training, saved on the checkpoint, and reused on every resume. A second bug was fixed too: after resume the replayed scheduler decayed the already-decayed LR a second time. Both are covered by `tests/test_train.py::test_cosine_horizon_is_fixed_at_first_training_not_rebuilt_on_resume`. **Epochs 4-20 of the `s1b_w64_d3` lineage were trained under the broken schedule** — a clean run to a fixed horizon has never been done yet and is the top open item.
+- **Unattended runs must keep Windows awake.** On 2026-08-09 the machine suspended itself 2 minutes into an overnight run and slept 12h38m; nothing in the chain requested sleep prevention. Worse, `Popen.wait(timeout=...)` does not count suspended time, so the hard timeout never fired. `overnight/orchestrate.py` now calls `SetThreadExecutionState(ES_SYSTEM_REQUIRED)` in `preflight()` and checks the deadline against the wall clock in 30 s slices.
+- **Width 96 wedges on Windows.** It repeatedly stalled in a CUDA-allocator OOM retry loop at batch 4 and 2 (`expandable_segments` is a no-op on Windows). Untested on Linux/WSL2. **Depth 4** fired the NaN-guard on up to ~20% of batches early on, then recovered.
+- Training checkpoints (`checkpoints/s1b_w64_d3/`, ~90 MB each) are git-ignored and exist only on the training PC. `best.pt` for that run is epoch 17; epoch 14 was overwritten and is unrecoverable.
+- To reproduce the wide config: copy `config.yaml`, set `model.width: 64`, `model.depth: 3`, and point `paths.cache_2d` at your slice cache.
+
 ### Training History
 36 epochs total (~295 sec/epoch on Colab T4). Loss was still declining at ep36 — the model is under-trained. The RTX 3060 should train at similar or faster speed. More epochs will most benefit ET.
 
@@ -235,7 +258,9 @@ Cache defaults to `05_frontend_demo/demo_cache/`. Override with `NEUROFED_CACHE_
 ## What to Do Next on RTX 3060
 
 ### 1. Continue training (highest value)
-The model stopped at 36 epochs and loss was still dropping. Resume:
+**Update:** the wide `s1b_w64_d3` run should now be continued with the fixed schedule, e.g. `python run.py --config <wide config> train --run-id s1b_w64_d3 --lr-horizon 50 --epochs 200 --patience 20 --device cuda`, then scored with `--eval-plane both` and re-ensembled with the original (see "Current Shipped Checkpoint"). Keep the machine awake and use `overnight/orchestrate.py`'s timeout helper if unattended.
+
+Original note (narrow model): the model stopped at 36 epochs and loss was still dropping. Resume:
 ```bash
 cd 03_augmentation_eval
 python run.py train --run-id overnight_run --resume
