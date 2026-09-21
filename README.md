@@ -50,9 +50,7 @@ Same ensemble, same 82 held-out patients, axial only, 492 sampled slices, pixels
 | WT | 0.842 | 0.924 | 0.773 | 0.9992 | 0.992 | 2.0 mm |
 
 - **F1 is the same number as Dice** for pixel-level segmentation (both are 2·TP / (2·TP + FP + FN)), so they are shown together rather than as two separate metrics. Precision is well above recall in every region, which is the under-segmentation noted above.
-- **ROC AUC and specificity flatter this model.** Only 2–18 % of pixels are tumor, so an all-background prediction already scores ~0.98 specificity. Use Dice/F1 and recall as the headline numbers; the ROC curves are most informative in the low false-positive zoom on the right.
-
-![ROC curves for ET, TC and WT](docs/roc_curves.png)
+- **ROC AUC and specificity flatter this model.** Only 2–18 % of pixels are tumor, so an all-background prediction already scores ~0.98 specificity. Use Dice/F1 and recall as the headline numbers. The interactive ROC curves are on the app's Dashboard page.
 
 Architecture: 2D U-Net with optional MixUp augmentation and tumor-type classification head. Trained on axial slices from 4 MRI modalities (T1c, T1n, T2f, T2w). See `HANDOFF.md` for training history, lessons learned and what to do next.
 
