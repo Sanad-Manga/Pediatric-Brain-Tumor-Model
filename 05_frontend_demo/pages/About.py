@@ -104,7 +104,7 @@ st.markdown("""
 
 <div class="page-hero">
     <div class="page-title">About NeuroPeds AI</div>
-    <div class="page-sub">Advancing decentralized pediatric neuro-oncology through privacy-first federated AI and clinical decision support.</div>
+    <div class="page-sub">Pediatric brain tumor segmentation research on BraTS-PEDs 2024.</div>
 </div>
 
 <div class="panel">
@@ -114,9 +114,10 @@ st.markdown("""
         Training robust deep learning models requires large multi-institutional datasets; however, patient privacy regulations and
         hospital data silos strictly limit raw data sharing.
         <br><br>
-        <b>NeuroPeds AI</b> solves this by combining <b>Federated Learning (FedAvg)</b> with <b>CORAL Domain Adaptation</b>,
-        allowing hospitals to collaboratively train state-of-the-art 3D U-Net segmentation models without ever transferring
-        sensitive patient MRI scans across institutional boundaries.
+        <b>NeuroPeds AI</b> is a workshop project that explores three ideas for that problem: data augmentation, federated
+        learning (FedAvg) and CORAL domain adaptation. The model deployed in this demo is a <b>centrally trained 2D U-Net
+        ensemble</b> (augmentation on; federation and domain adaptation off). The federated and domain-adaptation code lives in
+        separate research modules of the repository and did not produce the deployed checkpoint.
     </div>
 </div>
 
@@ -125,33 +126,33 @@ st.markdown("""
     <div class="tech-grid">
         <div class="tech-card">
             <div class="tech-card-icon">🌐</div>
-            <div class="tech-card-name">Federated Learning</div>
-            <div class="tech-card-desc">FedAvg protocol across 5 hospital nodes with secure gradient encryption and no raw data transfer.</div>
+            <div class="tech-card-name">Federated Learning (research module)</div>
+            <div class="tech-card-desc">FedAvg is implemented in 01_model_federated. The deployed checkpoint was not trained with it; it was trained centrally.</div>
         </div>
         <div class="tech-card">
             <div class="tech-card-icon">🧠</div>
-            <div class="tech-card-name">3D U-Net Segmentation</div>
-            <div class="tech-card-desc">Volumetric encoder-decoder with residual connections trained on 96³ voxel FP16 inputs.</div>
+            <div class="tech-card-name">2D U-Net Segmentation</div>
+            <div class="tech-card-desc">Slice-wise encoder-decoder reading four MRI channels (T1c, T1n, T2f, T2w). The deployed model averages two of them (widths 16 and 64).</div>
         </div>
         <div class="tech-card">
             <div class="tech-card-icon">🧬</div>
-            <div class="tech-card-name">CORAL Adaptation</div>
-            <div class="tech-card-desc">Second-order covariance alignment closing scanner-domain gaps across acquisition protocols.</div>
+            <div class="tech-card-name">CORAL Adaptation (research module)</div>
+            <div class="tech-card-desc">Covariance alignment is implemented in 01_model_federated, with a feature-space visualization in 02_domain_adaptation. Not used for the deployed checkpoint.</div>
         </div>
         <div class="tech-card">
             <div class="tech-card-icon">🔍</div>
-            <div class="tech-card-name">Explainable AI</div>
-            <div class="tech-card-desc">Grad-CAM and attention rollout maps grounding predictions in anatomy radiologists recognize.</div>
+            <div class="tech-card-name">Explainability</div>
+            <div class="tech-card-desc">Not implemented in this demo. Grad-CAM, attention and uncertainty maps are future work.</div>
         </div>
         <div class="tech-card">
             <div class="tech-card-icon">⚡</div>
             <div class="tech-card-name">FP16 Mixed Precision</div>
-            <div class="tech-card-desc">2× throughput over FP32 with loss-scaled training for numerical stability.</div>
+            <div class="tech-card-desc">Mixed-precision (AMP) training with loss scaling on CUDA.</div>
         </div>
         <div class="tech-card">
             <div class="tech-card-icon">📄</div>
             <div class="tech-card-name">Clinical PDF Reports</div>
-            <div class="tech-card-desc">Automated publication-ready outputs with per-subregion statistics and model confidence.</div>
+            <div class="tech-card-desc">Per-subregion statistics export, marked research use only and not a diagnosis.</div>
         </div>
     </div>
 </div>
@@ -161,23 +162,23 @@ st.markdown("""
     <div class="timeline">
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 1 — Dataset Curation</div>
-            <div class="tl-desc">BraTS-PEDs 2024 acquisition: 257 pediatric subjects across 4 MRI modalities with expert annotations.</div>
+            <div class="tl-desc">BraTS-PEDs 2024: 227 subjects in this project's manifests (two training hospitals, 53 + 92, and 82 held out), 4 MRI modalities, expert annotations.</div>
         </div>
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 2 — Centralized Baseline</div>
-            <div class="tl-desc">3D U-Net trained centrally to establish Dice / IoU / HD95 benchmark targets.</div>
+            <div class="tl-desc">2D U-Net trained centrally with augmentation; scored per patient with Dice and HD95 on the held-out set.</div>
         </div>
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 3 — Federated Training</div>
-            <div class="tl-desc">FedAvg deployment across 5 simulated hospital nodes; convergence validated over 50 rounds.</div>
+            <div class="tl-desc">FedAvg implemented as a research module (01_model_federated). Not used to train the deployed model, and no results from it are reported here.</div>
         </div>
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 4 — Domain Adaptation</div>
-            <div class="tl-desc">CORAL alignment layer added; domain gap reduced from 0.684 to 0.042 on held-out site.</div>
+            <div class="tl-desc">CORAL alignment and a feature-space visualization implemented as research modules. Not used for the deployed model, and no domain-gap result is claimed here.</div>
         </div>
         <div class="tl-item" style="margin-bottom:0"><div class="tl-dot"></div>
-            <div class="tl-title">Phase 5 — Clinical Integration</div>
-            <div class="tl-desc">XAI overlays, PDF export, and this Streamlit platform — ready for research demonstration.</div>
+            <div class="tl-title">Phase 5 — Research Demo</div>
+            <div class="tl-desc">Segmentation overlays, PDF export and this Streamlit app. Final model: a two-model ensemble at 0.754 held-out mean Dice; further training was stopped by decision.</div>
         </div>
     </div>
 </div>

@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="Clinical Explainability | NeuroPeds AI", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="Tumor Subregion Guide | NeuroPeds AI", page_icon="🩺", layout="wide")
 
 st.markdown("""
 <style>
@@ -59,8 +59,8 @@ st.markdown("""
 </style>
 
 <div class="page-hero">
-    <div class="page-title">Clinical Explainability</div>
-    <div class="page-sub">Translating deep learning feature maps into actionable pediatric neuro-oncology insights.</div>
+    <div class="page-title">Tumor Subregion Guide</div>
+    <div class="page-sub">Reference for the BraTS-PEDs tumor subregions and the MRI modalities the model reads.</div>
 </div>
 
 <div class="panel">
@@ -94,22 +94,12 @@ st.markdown("""
 </div>
 
 <div class="panel">
-    <div class="panel-title">🔍 Explainability Methods</div>
+    <div class="panel-title">🔍 Explainability</div>
     <div class="xai-row">
         <div class="xai-card">
-            <div class="xai-icon">🌡️</div>
-            <div class="xai-name">Grad-CAM</div>
-            <div class="xai-desc">Gradient-weighted class activation maps highlight which 3D voxel regions most influenced the segmentation decision for each subregion class.</div>
-        </div>
-        <div class="xai-card">
-            <div class="xai-icon">👁️</div>
-            <div class="xai-name">Attention Rollout</div>
-            <div class="xai-desc">Traces attention flow through transformer encoder layers, producing spatial importance maps aligned to anatomical structures.</div>
-        </div>
-        <div class="xai-card">
-            <div class="xai-icon">📊</div>
-            <div class="xai-name">Uncertainty Maps</div>
-            <div class="xai-desc">Monte Carlo dropout inference generates epistemic uncertainty estimates — flagging low-confidence boundary predictions for clinical review.</div>
+            <div class="xai-icon">ℹ️</div>
+            <div class="xai-name">Not implemented in this demo</div>
+            <div class="xai-desc">Grad-CAM, attention rollout and uncertainty maps are not part of this app. The deployed model is a 2D U-Net ensemble with no attention layers, and explaining its predictions is future work. What you can inspect today is the predicted segmentation overlay and per-region Dice on held-out patients.</div>
         </div>
     </div>
 </div>

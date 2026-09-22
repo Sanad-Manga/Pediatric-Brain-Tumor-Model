@@ -169,13 +169,13 @@ st.markdown("""
     </div>
     <div class="hero-title">Pediatric Brain Tumor<br>Clinical Decision Support</div>
     <div class="hero-sub">
-        AI-assisted segmentation and explainable reports for pediatric oncology, designed for streamlined radiologist workflows. Analyze multi-modal MRI scans with high precision.
+        Segmentation of pediatric brain tumors on multi-modal MRI, scored on held-out patients from BraTS-PEDs 2024. A research demo &mdash; not a clinical tool.
     </div>
     <div class="hero-tags">
-        <span class="hero-tag">⚕️ Clinical Review</span>
-        <span class="hero-tag">🔒 HIPAA Compliant</span>
+        <span class="hero-tag">🧪 Research demo</span>
+        <span class="hero-tag">🩻 2D U-Net ensemble</span>
         <span class="hero-tag">🧠 Multi-modal MRI</span>
-        <span class="hero-tag">📁 DICOM & NIfTI</span>
+        <span class="hero-tag">📁 .npz slice upload</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -189,25 +189,25 @@ st.markdown("""
         <div class="stat-icon">✅</div>
         <div class="stat-label">System Status</div>
         <div class="stat-value">Online</div>
-        <div class="stat-delta">All clinical systems ready</div>
+        <div class="stat-delta">Demo app running</div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">🗂</div>
-        <div class="stat-label">Analyzed Scans</div>
-        <div class="stat-value">257</div>
-        <div class="stat-delta">T1 · T1c · T2 · FLAIR</div>
+        <div class="stat-label">Held-out Patients</div>
+        <div class="stat-value">82</div>
+        <div class="stat-delta">Never used for training</div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">⏱</div>
-        <div class="stat-label">Avg Processing Time</div>
-        <div class="stat-value">~45s</div>
-        <div class="stat-delta" style="color: #0284C7">Per full 2D volume</div>
+        <div class="stat-label">Model</div>
+        <div class="stat-value">U-Net ensemble</div>
+        <div class="stat-delta" style="color: #0284C7">2D · widths 16 + 64</div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">🎯</div>
-        <div class="stat-label">Baseline Accuracy</div>
-        <div class="stat-value">70%</div>
-        <div class="stat-delta" style="color: #0284C7">Dice Score (Whole Tumor)</div>
+        <div class="stat-label">Held-out Mean Dice</div>
+        <div class="stat-value">0.754</div>
+        <div class="stat-delta" style="color: #0284C7">ET · NC · WT, axial + coronal</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -241,13 +241,13 @@ def mod_card(icon, name, nav, desc):
 col1, col2, col3 = st.columns(3, gap="medium")
 with col1:
     st.markdown(mod_card("🧠", "MRI Analysis Studio", "Clinical & Analysis →", 
-        "Upload multi-modal MRI volumes. Inspect slices in an interactive 2D viewer with segmentation overlays rendered per-class."), unsafe_allow_html=True)
+        "Upload multi-modal MRI slices (.npz). Inspect them in an interactive 2D viewer with segmentation overlays rendered per-class."), unsafe_allow_html=True)
 with col2:
     st.markdown(mod_card("📄", "Segmentation Report", "Clinical & Analysis →", 
-        "AI-generated patient summary with tumor statistics, region-level interpretation, and one-click PDF export for clinical records."), unsafe_allow_html=True)
+        "Patient summary with tumor statistics, region-level interpretation, and one-click PDF export (research use only)."), unsafe_allow_html=True)
 with col3:
-    st.markdown(mod_card("🩺", "Clinical Explainability", "Clinical & Analysis →", 
-        "Grad-CAM and attention maps reveal exactly which voxels drove each prediction — grounding AI decisions in anatomy radiologists recognize."), unsafe_allow_html=True)
+    st.markdown(mod_card("🩺", "Tumor Subregion Guide", "Reference →", 
+        "Reference for the four BraTS-PEDs tumor subregions and the MRI modalities the model reads. Explainability maps are not implemented in this demo."), unsafe_allow_html=True)
 
 st.markdown("<div style='margin-bottom:20px'></div>", unsafe_allow_html=True)
 
@@ -273,8 +273,8 @@ st.markdown("""
                 <td style="padding:12px 0; color:#0F172A; font-weight:600;">BraTS-PEDs 2024</td>
             </tr>
             <tr style="border-bottom:1px solid #E2E8F0;">
-                <td style="padding:12px 0; color:#475569;">Subjects Analyzed</td>
-                <td style="padding:12px 0; color:#0284C7; font-weight:600;">257</td>
+                <td style="padding:12px 0; color:#475569;">Subjects in this project</td>
+                <td style="padding:12px 0; color:#0284C7; font-weight:600;">227 (53 + 92 training, 82 held out)</td>
             </tr>
             <tr style="border-bottom:1px solid #E2E8F0;">
                 <td style="padding:12px 0; color:#475569;">Supported Modalities</td>

@@ -306,8 +306,8 @@ with col_view:
                         elif d<18: ov[i,j]=4
                 fig.add_trace(go.Heatmap(z=ov,colorscale=overlay_colorscale(),zmin=0,zmax=4,showscale=False,opacity=1.0))
             h,w=96,96
-            status_right=f"Demo mode · 96×96 · {modality}"
-            source_label="🔬 Demo — upload patient .npz slices to see real data"
+            status_right=f"Synthetic placeholder · 96×96 · {modality}"
+            source_label="🔬 Synthetic placeholder image, not a real scan — upload patient .npz slices to see real data"
 
         fig.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",

@@ -26,7 +26,7 @@ pages = {
     "Clinical & Analysis": [
         st.Page("pages/MRI_Analysis.py", title="MRI Analysis Studio", icon="🖥️"),
         st.Page("pages/Segmentation_Report.py", title="Segmentation Report", icon="📋"),
-        st.Page("pages/Clinical_View.py", title="Clinical Explainability", icon="🩺"),
+        st.Page("pages/Clinical_View.py", title="Tumor Subregion Guide", icon="🩺"),
     ],
     "System": [
         st.Page("pages/About.py", title="About NeuroPeds AI", icon="📚"),
@@ -256,8 +256,8 @@ with st.sidebar:
             <span class="sidebar-status-value" style="color: var(--accent);">Ready</span>
         </div>
         <div class="sidebar-status-row">
-            <span class="sidebar-status-label">Compliance</span>
-            <span class="sidebar-status-value" style="color: var(--accent-violet);">HIPAA · GDPR</span>
+            <span class="sidebar-status-label">Intended use</span>
+            <span class="sidebar-status-value" style="color: var(--accent-violet);">Research only</span>
         </div>
         <div class="sidebar-status-row" style="margin-top:10px; border-top:1px solid #E2E8F0; padding-top:10px;">
             <span class="sidebar-status-label">Session Time</span>
