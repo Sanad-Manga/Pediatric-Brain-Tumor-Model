@@ -26,3 +26,17 @@ def test_pca_and_lda_return_two_dimensions():
     assert lda.shape == (24, 2)
     assert np.isfinite(pca).all()
     assert np.isfinite(lda).all()
+
+
+def test_four_panel_plot_creates_nested_output(tmp_path):
+    rng = np.random.default_rng(7)
+    labels = np.repeat(["Hospital A", "Hospital B", "Held-out"], 3)
+    projections = {
+        "Before adaptation": (rng.normal(size=(9, 2)), rng.normal(size=(9, 2))),
+        "After adaptation": (rng.normal(size=(9, 2)), rng.normal(size=(9, 2))),
+    }
+    output = tmp_path / "nested" / "comparison.png"
+    result = MODULE.render_comparison(projections, labels, output)
+    assert result == output
+    assert output.is_file()
+    assert output.stat().st_size > 0

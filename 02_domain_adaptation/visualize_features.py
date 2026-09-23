@@ -60,6 +60,27 @@ def plot_projection(ax, points, labels, title):
     ax.grid(alpha=0.2)
 
 
+def render_comparison(
+    projections: dict[str, tuple[np.ndarray, np.ndarray]],
+    labels: np.ndarray,
+    output: str | Path,
+) -> Path:
+    """Render and save the required four-panel before/after comparison."""
+    fig, axes = plt.subplots(2, 2, figsize=(13, 10), constrained_layout=True)
+    for column, stage in enumerate(("Before adaptation", "After adaptation")):
+        pca, lda = projections[stage]
+        plot_projection(axes[0, column], pca, labels, f"PCA — {stage}")
+        plot_projection(axes[1, column], lda, labels, f"LDA — {stage}")
+    handles, legend_labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, legend_labels, loc="outside upper center", ncol=3)
+
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache-path", required=True)
@@ -88,17 +109,9 @@ def main() -> None:
         )
         projections[stage] = project(features, labels)
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 10), constrained_layout=True)
-    for column, stage in enumerate(("Before adaptation", "After adaptation")):
-        pca, lda = projections[stage]
-        plot_projection(axes[0, column], pca, labels, f"PCA — {stage}")
-        plot_projection(axes[1, column], lda, labels, f"LDA — {stage}")
-    handles, legend_labels = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handles, legend_labels, loc="outside upper center", ncol=3)
-    fig.savefig(args.output, dpi=200, bbox_inches="tight")
-    print(f"Saved {args.output}")
+    output_path = render_comparison(projections, labels, args.output)
+    print(f"Saved {output_path}")
 
 
 if __name__ == "__main__":
     main()
-
