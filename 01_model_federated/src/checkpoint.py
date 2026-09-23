@@ -37,6 +37,37 @@ def save_checkpoint(
     return path
 
 
+def prune_old_checkpoints(base_dir: str, run_id: str, keep_last: int = 5,
+                          keep_every: int = 20) -> None:
+    """Deletes epoch_N.pt files except the `keep_last` most recent and every
+    `keep_every`-th epoch (milestones, so a run can still be scored at coarse
+    granularity after the fact). Real measurement: one epoch of this 4.9M-param
+    model's checkpoint (weights + Adam state) is ~56MB, and a single real epoch
+    on 8 subjects took under a second -- an unattended multi-hour run at that
+    pace saves every-epoch-forever into tens of GB for no benefit. Never
+    deletes the single latest file even if it wouldn't otherwise qualify, so
+    resume always has something to load.
+    """
+    d = Path(base_dir) / run_id
+    if not d.is_dir():
+        return
+    entries: list[tuple[int, Path]] = []
+    for entry in d.iterdir():
+        m = _CKPT_RE.match(entry.name)
+        if m:
+            entries.append((int(m.group(1)), entry))
+    if len(entries) <= keep_last:
+        return
+    entries.sort(key=lambda t: t[0])
+    latest_epoch = entries[-1][0]
+    keep_epochs = {e for e, _ in entries[-keep_last:]}
+    keep_epochs |= {e for e, _ in entries if e % keep_every == 0}
+    keep_epochs.add(latest_epoch)
+    for epoch, path in entries:
+        if epoch not in keep_epochs:
+            path.unlink(missing_ok=True)
+
+
 def latest_checkpoint(base_dir: str, run_id: str) -> Path | None:
     d = Path(base_dir) / run_id
     if not d.is_dir():
