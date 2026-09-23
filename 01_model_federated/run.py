@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import time
 
+from src.augment3d import Augment3D
 from src.config import TrainConfig
 from src.federated import train_federated
 from src.train_single import train_single_client
@@ -32,6 +34,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--coral-steps-per-round", type=int, default=None)
     p.add_argument("--checkpoint-dir", default="checkpoints")
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--deadline-unix", type=float, default=None,
+                    help="unix timestamp; single-client loop stops between epochs once past it")
+    p.add_argument("--lr-horizon", type=int, default=None,
+                    help="single-client only: cosine-anneal lr to 1e-5 over this many epochs "
+                         "(fixed regardless of --epochs); default: no schedule")
+    p.add_argument("--loss", choices=["dice_ce", "dice_focal"], default="dice_ce",
+                    help="single-client only: dice_focal down-weights easy/majority voxels, "
+                         "a standard fix for the rare-class (ET) under-segmentation dice_ce shows")
     return p
 
 
@@ -52,12 +62,20 @@ def main() -> None:
         checkpoint_dir=args.checkpoint_dir,
     )
 
+    # --use-augmentation used to be a complete no-op end to end: the config
+    # flag existed and train_single.py's loop already had the hook
+    # (`augmentation_transform`), but nothing ever built a real transform to
+    # pass through it (01_model_federated/BRIEF.md always said augmentation
+    # was a separate section's job; that section never shipped a 3D version).
+    augmentation_transform = Augment3D() if config.use_augmentation else None
+
     if config.use_federation:
         _model, round_losses = train_federated(
             config=config,
             client_manifest_paths=args.client_manifests,
             num_rounds=args.rounds,
             local_epochs=args.epochs,
+            augmentation_transform=augmentation_transform,
             resume=args.resume,
         )
         print(f"Federated training complete. Round losses: {round_losses}")
@@ -66,9 +84,15 @@ def main() -> None:
             config=config,
             manifest_path=args.manifest,
             num_epochs=args.epochs,
+            augmentation_transform=augmentation_transform,
             resume=args.resume,
+            deadline_unix=args.deadline_unix,
+            lr_horizon=args.lr_horizon,
+            loss_kind=args.loss,
         )
-        print(f"Single-client training complete. Losses: {losses}")
+        stopped_early = args.deadline_unix is not None and time.time() >= args.deadline_unix
+        print(f"Single-client training complete ({len(losses)} epoch(s) this call"
+              f"{', stopped by deadline' if stopped_early else ''}). Losses: {losses}")
 
 
 if __name__ == "__main__":
