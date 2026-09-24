@@ -1,5 +1,7 @@
 # Spec: Federated 3D U-Net for Pediatric Brain Tumor Segmentation (Section 01: model_federated)
 
+> **Addendum 2 (2026-09-25) — input-sequence dropout:** §2, §3, §4 (Req 25-34), §6 and §7 were extended to add random input-sequence ("modality") dropout to the augmentation stack. This is a *forward* plan (unlike Addendum 1, which documented already-built work). Motivation, measured 2026-09-25 on the 81 scoreable held-out subjects with the best 3D checkpoint (mean Dice 0.6814 with all 4 sequences): removing T2-FLAIR drops it to 0.25, T2w to 0.49, T1c to 0.54 (ET 0.39 -> 0.09), T1n to 0.55 — while realistic thick-slice/gap acquisition geometry costs only ~0.005 (routine axial 5 mm/1 mm). A clinic missing one sequence is therefore a far bigger deployment risk than slice geometry, and the model has never seen an absent sequence in training.
+>
 > **Addendum (2026-09-23):** §2, §3, §4 (Req 17-24), §5 and §7 were updated to bring the real 3D data-augmentation stack into this section's scope. The original spec (below, everything else unchanged) said augmentation logic belonged to section 03 and only the hook would live here — that was true while the 2D pipeline was the active model. The project has since started exploring a 3D pipeline (2D progress plateaued; a supervising doctor recommended revisiting 3D), and section 03's augmentation code is slice-based and does not apply to 3D volumes. A 3D augmentation stack was built directly in this section instead, superseding the original out-of-scope line. This addendum documents what was already built and verified, not a forward plan.
 
 ## 1. Goal
@@ -25,6 +27,12 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
   - No mixup/sample-blending of any kind (see Out of Scope).
   - Exposed as an `Augment3D` callable matching the existing `transform(x, y) -> (x, y)` hook contract in `train_single.py`, operating on batched `(B, 4, D, H, W)` / `(B, D, H, W)` tensors.
 - `run.py` builds a real `Augment3D()` and passes it through to both the single-client and federated training paths when `--use-augmentation` is passed (previously a complete no-op end to end: the flag and the hook existed, but nothing ever constructed a transform to pass through it).
+- **Input-sequence dropout (Addendum 2), in `src/augment3d.py`:** a new image-only MONAI transform `RandModalityDropoutd` (a `MapTransform` + `RandomizableTransform`), enabled by a new `modality_dropout_prob` kwarg on `build_transforms3d` / `Augment3D` (default `0.0` = the transform is not added at all, behaviour bitwise-identical to today).
+  - Each of the input's channels is dropped independently with probability `p`; a dropped channel is set to exactly `0.0` (the z-score mean — the hook receives already-normalized tensors, so "sequence missing" == an all-zero channel). If a draw would drop every channel, one channel chosen uniformly at random is kept (never an all-zero input; no rejection loop).
+  - Appended at the END of the chain — after the intensity/noise transforms, before `AssertLabelValuesd` — so nothing can re-introduce non-zero values into a dropped channel. The label is never touched.
+  - Draws are independent per sample in a batch and participate in `Compose.set_random_state`, so a fixed seed is reproducible.
+  - This zero-channel encoding is also the convention deployment must use for a sequence a clinic does not have.
+- `run.py` gains `--modality-dropout FLOAT` (default `0.0`), passed to `Augment3D(modality_dropout_prob=...)` for both the single-client and federated paths; a positive value without `--use-augmentation` (which would otherwise silently do nothing) is a hard CLI error.
 - Per-epoch checkpointing to `checkpoints/<run_id>/epoch_<N>.pt` containing model state, optimizer state, epoch number, and (for federation) round number.
 - Resume-from-checkpoint: given a `run_id` (and, for federation, which client), training resumes from the latest saved epoch rather than epoch 0.
 - A minimal CLI/entry point to launch: single-client run, federated run, and resume of either.
@@ -35,6 +43,7 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 - CORAL / any domain adaptation math (section 02).
 - ~~The augmentation transform's internal logic — Mixup or any other technique (section 03).~~ **Superseded by this addendum** — the spatial/intensity augmentation logic now lives here (see §2). Mixup specifically remains out of scope (next bullet), but no longer because it belongs to another section.
 - **Mixup / any cross-sample blending for the 3D pipeline.** The 2D pipeline's mixup blends two 2D slices; a 3D-volume equivalent would blend anatomy at every voxel of a full segmentation target and has never been validated as sane for this task. Left out deliberately, not ported speculatively.
+- **(Addendum 2)** Any change to the model, loss, data loading, federated/CORAL logic, or the default behaviour of any existing flag/transform; a missing-sequence evaluation tool (the 2026-09-25 measurements used a throwaway script outside the repo); sequence-specific or learned dropout probabilities (one scalar `p` for all channels only); dropping anything other than whole input channels; and **any claim that dropout improves held-out or missing-sequence Dice** — verifying that needs a real training run plus evaluation, not this spec's tests.
 - Final ablation-matrix result generation and the results CSV (section 03).
 - Any real `.nii.gz` I/O testing (no real data cache exists yet) — real-mode code path is written but only exercised once the cache lands; this build validates it structurally, not against real files.
 - Streamlit demo / any UI (section 05).
@@ -69,12 +78,27 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 23. A batch with `B > 1` is accepted and each sample is transformed independently (the callable does not hardcode the batch_size=1 contract even though every other call site in this section does).
 24. `run.py ... --use-augmentation` (single-client and federated paths) constructs a real `Augment3D` and passes it through to `train_single_client`, verified by an end-to-end test that runs the real transform (not a mock) through the actual training loop on dummy data for at least 1 epoch and asserts the resulting loss is finite. **No claim is made or tested here about the effect of augmentation on held-out Dice on real data** — that requires an actual training run, which is out of scope for this addendum (see §3).
 
+25. `build_transforms3d(...)` and `Augment3D(...)` accept a `modality_dropout_prob` kwarg, default `0.0`. With the default, the returned `Compose` contains no `RandModalityDropoutd`, and `Augment3D(seed=s)` and `Augment3D(seed=s, modality_dropout_prob=0.0)` produce bitwise-identical output on the same input (existing behaviour unchanged; Req 17-24 keep passing unmodified).
+26. A `modality_dropout_prob` that is negative, `>= 1.0`, or NaN raises `ValueError` at construction time, naming the offending value.
+27. With `modality_dropout_prob = p` (`0 < p < 1`) and every other transform's probability set to 0.0, every output image channel is either bitwise-identical to the same input channel or exactly all-zero (`== 0.0` everywhere) — no channel is partially modified — and the label tensor is bitwise-identical to the input label.
+28. With every OTHER transform's probability forced to 1.0 and `p = 0.99`, every dropped output channel is exactly all-zero (dropout runs after the intensity/noise transforms, so scale/shift/noise cannot re-introduce non-zero values into a dropped channel), and the label value set is still a subset of `{0, 1, 2, 3, 4}`.
+29. Over at least 400 independent draws on a `(4, D, H, W)` input that is non-zero everywhere, with `p = 0.99`: no output is ever all-zero across all 4 channels, and each of the 4 channel indices is kept (non-zero) in at least one draw (the keep-one fallback is not biased toward a fixed channel).
+30. Over at least 400 independent seeded draws with `p = 0.3` (all other probabilities 0.0), the observed drop rate of each of the 4 channels lies in `[0.2, 0.4]`.
+31. Two `Augment3D(seed=s, modality_dropout_prob=p)` instances called once on the same input produce bitwise-identical output (reproducibility).
+32. A `B = 16` batch of identical samples with `p = 0.5` produces drop patterns that are not all identical across the samples (independent per-sample draws).
+33. `run.py --modality-dropout FLOAT` exists with default `0.0`. A value `> 0` without `--use-augmentation`, or any value outside `[0.0, 1.0)`, exits through an argparse error (`SystemExit` code 2) whose message names the offending flag(s), before any data loading or training. With `--use-augmentation --modality-dropout 0.2` the transform handed to training has dropout enabled at 0.2 (inspectable on its `Compose`) at both the single-client and federated call sites; with `--use-augmentation` alone it has no dropout transform (unchanged behaviour).
+34. `train_single_client` runs at least 1 epoch on dummy data with a real (not mocked) `Augment3D(modality_dropout_prob=0.3)` and finishes with a finite loss. **No claim is made or tested about held-out Dice or missing-sequence robustness** — that requires a real training run and evaluation, outside this spec's tests.
+
 **Assumption:** FedAvg round/local-epoch counts, learning rate, and optimizer are exposed as config parameters with reasonable defaults (Adam, lr=1e-3, 1 local epoch/round, 2 rounds for smoke tests) rather than fixed — no spec constraint dictates specific values.
 **Assumption:** `features` is produced by global-average-pooling the U-Net bottleneck activation map to a 1D vector; exact dimensionality is an implementation default, not contractually fixed.
 **Assumption:** Checkpoint resume identifies "latest" by highest epoch/round number found in the run's checkpoint directory, not by a separately tracked "latest" pointer file.
 **Assumption:** Loss function is Dice+CrossEntropy over the 5 label classes (standard MONAI choice for multi-class 3D segmentation); not contractually specified. **Superseded in part:** `run.py --loss` also accepts `dice_focal` (a class-imbalance-aware variant); `dice_ce` remains the default.
 **Assumption:** Test framework is `pytest`, consistent with a Python/MONAI/PyTorch stack.
 **Assumption (addendum):** Augmentation transform probabilities and magnitudes (flip 0.5, rotate 0.3 @ ±10°, zoom 0.3 @ 0.9-1.1×, intensity scale/shift 0.3 @ ±0.1, Gaussian noise 0.2 @ std 0.05) mirror section 03's 2D defaults for consistency across the project; not contractually specified, and untuned against real 3D held-out Dice.
+
+**Assumption (Addendum 2):** A missing sequence is encoded as an all-zero channel *after* z-score normalization. Skull-stripped background is not 0 after z-scoring, so a zeroed channel is not identical to a real sequence's background level; this matches the convention the 2026-09-25 missing-sequence measurements used, and the model learns that convention from training, so deployment must apply exactly the same encoding to an absent sequence.
+**Assumption (Addendum 2):** The per-channel drop probability used for the first real training run (0.15: ~52% of samples keep all 4 sequences, ~37% lose one, ~10% two, ~1% three) is a judgment call, not tuned; nothing here fixes a value.
+**Assumption (Addendum 2):** The federated path needs no separate wiring because `run.py` builds one augmentation transform and passes it to both paths; Req 33 checks both call sites receive it, and Req 34 exercises the single-client loop only.
 
 ## 5. Structure
 
@@ -87,12 +111,12 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 │   ├── __init__.py
 │   ├── model.py            # 3D U-Net wrapper: model(x) -> (seg_logits, features)
 │   ├── data.py             # Manifest-driven Dataset: dummy-tensor mode + real .nii.gz mode
-│   ├── augment3d.py        # 3D MONAI augmentation stack + Augment3D callable (addendum)
+│   ├── augment3d.py        # 3D MONAI augmentation stack + Augment3D callable (addendum); + RandModalityDropoutd (addendum 2)
 │   ├── train_single.py     # Single-client training loop
 │   ├── federated.py        # FedAvg orchestration: local training + weighted aggregation
 │   ├── checkpoint.py        # save/load/resume helpers
 │   └── config.py           # Config dataclass/CLI: use_augmentation, use_federation, use_domain_adaptation, etc.
-├── run.py                  # CLI entry point (single-client / federated / resume); builds Augment3D() when --use-augmentation is set
+├── run.py                  # CLI entry point (single-client / federated / resume); builds Augment3D() when --use-augmentation is set; --modality-dropout (addendum 2)
 ├── checkpoints/            # Created at runtime, gitignored
 └── tests/
     ├── test_model.py
@@ -100,7 +124,7 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
     ├── test_single_client.py
     ├── test_federated.py
     ├── test_checkpoint.py
-    └── test_augment3d.py   # addendum
+    └── test_augment3d.py   # addendum; + sequence-dropout tests and CLI validation (addendum 2)
 ```
 
 ## 6. Edge Cases
@@ -120,6 +144,11 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 | A transform in the augmentation stack produces an out-of-range label value | `AssertLabelValuesd` raises `AssertionError` naming the bad value(s) immediately, no silent pass-through |
 | All augmentation transform probabilities set to 0.0 | Output is bitwise-identical to input (true no-op, not just "usually unchanged") |
 | Augmentation called on a batch with `B > 1` | Each sample transformed independently; no cross-sample interaction |
+| `modality_dropout_prob = 0.0` (default) | `RandModalityDropoutd` is not added to the chain at all; output identical to before this addendum |
+| `modality_dropout_prob` negative, `>= 1.0`, or NaN | `ValueError` naming the value at construction (library); argparse error, exit code 2 (CLI) |
+| `--modality-dropout 0.2` given without `--use-augmentation` | argparse error naming both flags, before any data loading or training (would otherwise silently do nothing) |
+| A draw would drop every input channel | One channel, chosen uniformly at random, is kept; the model never receives an all-zero input |
+| Input has fewer than 4 channels (e.g. 1) | Same rule applies: a lone channel is never dropped |
 
 ## 7. Done Checklist
 - [x] Req 1: `model(x)` returns `(seg_logits, features)` with correct shapes for `(batch, 4, 96, 96, 96)` input
@@ -146,3 +175,13 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 - [x] Req 22: `AssertLabelValuesd` raises on an out-of-range label
 - [x] Req 23: `B > 1` batches processed correctly, independently per sample
 - [x] Req 24: `run.py --use-augmentation` wires a real `Augment3D` end-to-end through `train_single_client` (dummy data, finite loss) — no held-out-Dice effectiveness claim made
+- [x] Req 25: `modality_dropout_prob` kwarg, default 0.0 adds no dropout transform and output is bitwise-identical to before
+- [x] Req 26: negative / >= 1.0 / NaN `modality_dropout_prob` raises `ValueError`
+- [x] Req 27: with other probs 0, every output channel is bitwise-unchanged or exactly all-zero; label bitwise-unchanged
+- [x] Req 28: with other probs 1.0 and `p=0.99`, dropped channels are still exactly all-zero (dropout runs last); labels stay valid
+- [x] Req 29: over >= 400 draws at `p=0.99`, never all channels dropped, and each of the 4 channels is kept at least once
+- [x] Req 30: over >= 400 seeded draws at `p=0.3`, each channel's drop rate is in [0.2, 0.4]
+- [x] Req 31: same-seed reproducibility with dropout enabled
+- [x] Req 32: `B=16` identical samples at `p=0.5` do not all get the same drop pattern
+- [x] Req 33: `run.py --modality-dropout` default 0.0; `>0` without `--use-augmentation` or out-of-range exits with argparse error (code 2); with `--use-augmentation` the transform has dropout at the given value (both call sites); without the flag, none
+- [x] Req 34: end-to-end `train_single_client` 1 epoch with real `Augment3D(modality_dropout_prob=0.3)` gives a finite loss — no held-out-Dice claim

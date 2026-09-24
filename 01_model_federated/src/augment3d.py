@@ -37,6 +37,7 @@ from monai.transforms import (
     MapTransform,
     RandFlipd,
     RandGaussianNoised,
+    RandomizableTransform,
     RandRotated,
     RandScaleIntensityd,
     RandShiftIntensityd,
@@ -74,6 +75,53 @@ class AssertLabelValuesd(MapTransform):
         return d
 
 
+def _validate_dropout_prob(p: float) -> float:
+    p = float(p)
+    if not (0.0 <= p < 1.0):  # also rejects NaN
+        raise ValueError(f"modality_dropout_prob must be in [0.0, 1.0), got {p!r}")
+    return p
+
+
+class RandModalityDropoutd(RandomizableTransform, MapTransform):
+    """Zero whole input channels (MRI sequences) at random, to teach the model
+    to cope with a sequence a clinic did not acquire.
+
+    Each channel is dropped independently with probability `drop_prob`. If a
+    draw would drop every channel, one channel chosen uniformly at random is
+    kept instead, so the model never sees an all-zero input. A dropped channel
+    is exactly 0.0: the hook receives already z-scored tensors, so "sequence
+    missing" is encoded as an all-zero channel -- the same encoding deployment
+    has to use for an absent sequence.
+
+    Must run after every other image transform in the chain: anything that
+    scales/shifts/adds noise afterwards would re-introduce non-zero values into
+    a dropped channel.
+    """
+
+    def __init__(self, keys, drop_prob: float, allow_missing_keys: bool = False):
+        MapTransform.__init__(self, keys, allow_missing_keys)
+        RandomizableTransform.__init__(self, 1.0)
+        self.drop_prob = _validate_dropout_prob(drop_prob)
+
+    def randomize(self, n_channels: int) -> np.ndarray:
+        drop = self.R.random_sample(n_channels) < self.drop_prob
+        if drop.all():
+            drop[self.R.randint(n_channels)] = False
+        return drop
+
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.key_iterator(d):
+            img = d[key]
+            drop = self.randomize(img.shape[0])
+            # copy: earlier no-op transforms can hand back the caller's own tensor
+            img = img.clone() if isinstance(img, torch.Tensor) else np.array(img, copy=True)
+            for c in np.flatnonzero(drop):
+                img[c] = 0.0
+            d[key] = img
+        return d
+
+
 def build_transforms3d(
     flip_prob: float = 0.5,
     rotate_prob: float = 0.3,
@@ -88,11 +136,17 @@ def build_transforms3d(
     gaussian_noise_prob: float = 0.2,
     gaussian_noise_std: float = 0.05,
     seed: int | None = None,
+    modality_dropout_prob: float = 0.0,
 ) -> Compose:
     """Build the 3D augmentation stack. Always returns a real Compose --
     the "off" case is handled by the caller never building/using one, same
     convention as the 2D module.
+
+    `modality_dropout_prob` > 0 appends RandModalityDropoutd as the last image
+    transform; the default 0.0 adds nothing, leaving the chain exactly as it
+    was before sequence dropout existed.
     """
+    modality_dropout_prob = _validate_dropout_prob(modality_dropout_prob)
     keys = [IMAGE_KEY, LABEL_KEY]
     rotate_rad = float(np.deg2rad(rotate_range_deg))
 
@@ -121,8 +175,10 @@ def build_transforms3d(
         RandScaleIntensityd(keys=IMAGE_KEY, factors=scale_intensity_factor, prob=scale_intensity_prob),
         RandShiftIntensityd(keys=IMAGE_KEY, offsets=shift_intensity_offset, prob=shift_intensity_prob),
         RandGaussianNoised(keys=IMAGE_KEY, prob=gaussian_noise_prob, mean=0.0, std=gaussian_noise_std),
-        AssertLabelValuesd(keys=LABEL_KEY, valid_labels=VALID_LABELS),
     ]
+    if modality_dropout_prob > 0.0:
+        transforms.append(RandModalityDropoutd(keys=IMAGE_KEY, drop_prob=modality_dropout_prob))
+    transforms.append(AssertLabelValuesd(keys=LABEL_KEY, valid_labels=VALID_LABELS))
 
     compose = Compose(transforms)
     if seed is not None:

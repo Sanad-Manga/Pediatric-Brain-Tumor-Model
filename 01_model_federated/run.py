@@ -42,11 +42,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--loss", choices=["dice_ce", "dice_focal"], default="dice_ce",
                     help="single-client only: dice_focal down-weights easy/majority voxels, "
                          "a standard fix for the rare-class (ET) under-segmentation dice_ce shows")
+    p.add_argument("--modality-dropout", type=float, default=0.0,
+                    help="per-sequence probability of zeroing a whole input channel during augmentation, "
+                         "in [0.0, 1.0); requires --use-augmentation")
     return p
 
 
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    if not (0.0 <= args.modality_dropout < 1.0):  # also rejects NaN
+        parser.error(f"--modality-dropout must be in [0.0, 1.0), got {args.modality_dropout}")
+    if args.modality_dropout > 0.0 and not args.use_augmentation:
+        parser.error("--modality-dropout requires --use-augmentation "
+                     "(it is applied by the augmentation transform and would silently do nothing)")
+    return args
+
+
 def main() -> None:
-    args = build_arg_parser().parse_args()
+    args = parse_args()
 
     config = TrainConfig(
         use_augmentation=args.use_augmentation,
@@ -67,7 +81,9 @@ def main() -> None:
     # (`augmentation_transform`), but nothing ever built a real transform to
     # pass through it (01_model_federated/BRIEF.md always said augmentation
     # was a separate section's job; that section never shipped a 3D version).
-    augmentation_transform = Augment3D() if config.use_augmentation else None
+    augmentation_transform = (
+        Augment3D(modality_dropout_prob=args.modality_dropout) if config.use_augmentation else None
+    )
 
     if config.use_federation:
         _model, round_losses = train_federated(
