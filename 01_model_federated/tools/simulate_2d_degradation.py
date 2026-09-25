@@ -17,23 +17,38 @@ What it simulates: our 3D pipeline trains on the 96^3 cache, resampled
 volumes. A real 2D-acquired clinical sequence (axial 2D FSE/TSE T1/T2/FLAIR,
 the common routine protocol) instead has thick slices (commonly ~4-6mm) with
 a gap between them (commonly ~1mm), while in-plane resolution stays close to
-native. This function approximates that: along one axis of the 96^3 volume
-(ASSUMPTION: axis 0 -- this project's resample script never verified which
-array axis corresponds to which anatomical plane per subject, so "through-
-plane" here is an assumption, not a checked fact), it averages together
-groups of adjacent slices (partial-volume blur, standard effect of a thick
-slice) and drops slices to simulate the gap, then nearest-fills back to 96
-so the degraded volume still matches the shape the model expects (a real
-clinical stack resampled onto this grid would have exactly this kind of
-"real data every few slices, interpolated/duplicated in between" structure).
+native. This function approximates that along one axis of the 96^3 volume: it
+averages groups of adjacent slices into one thick slice (partial-volume blur),
+DELETES the next group entirely (the gap) and nearest-fills it from the
+preceding slice, so the degraded volume keeps the shape the model expects.
+
+Geometry (verified 2026-09-25 from the NIfTI headers of every held-out
+subject): each source volume is 240x240x155 at 1.0 mm, LPS orientation, so
+array axis 2 is the axial (superior-inferior) through-plane direction and
+axes 0 / 1 are left-right / anterior-posterior. After the 96^3 resample a
+voxel is 155/96 = 1.61 mm along axis 2 and 240/96 = 2.5 mm along axes 0 and 1.
+
+WARNING -- this tool is much harsher than a routine clinical scan. A "slab"
+and the gap after it are the same size, so the effective slice spacing is
+2 x slab voxels:
+
+    --axis 2 (axial),   slab 4:  6.5 mm slices, 6.5 mm gaps -> 12.9 mm spacing
+    --axis 0 or 1,      slab 4:  10 mm slices,  10 mm gaps  -> 20 mm spacing
+                                 (--axis 0, the default, is this sagittal case)
+
+A routine axial protocol (~5 mm slices, ~1 mm gap, ~6 mm spacing) is far
+milder than anything this tool produces at its defaults. An earlier version of
+this docstring wrongly equated slab 4 with "~6 mm slice spacing". On
+2026-09-25 a millimetre-accurate acquire-then-resample simulation put the cost
+of a routine axial 5 mm / 1 mm protocol at only ~0.004 held-out Dice for the
+best 3D checkpoint, versus ~0.137 for this tool's defaults. Use this tool as
+an extreme-degradation stress test, not as a model of a typical scan; it is
+still a proxy that has not been checked against any real clinic's protocol.
 
 Usage:
     python tools/simulate_2d_degradation.py --checkpoint <path> \
         --cache-path "D:/NeuroPeds AI/cache_96cube" \
-        --slices-per-thick-slab 4   # ASSUMPTION: ~1.6mm/voxel native (240/96,
-                                     # 155/96 blended) * 4 ~= 6mm slice spacing,
-                                     # in the ballpark of a real 5mm+1mm-gap
-                                     # 2D protocol -- not a verified figure
+        --axis 2 --slices-per-thick-slab 2   # axial, 3.2 mm slices + 3.2 mm gaps
 """
 from __future__ import annotations
 
@@ -182,9 +197,13 @@ def main() -> int:
     ap.add_argument("--manifest", default=str(SEC01.parent / "00_shared" / "manifests" / "heldout.json"))
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--axis", type=int, default=0,
-                    help="ASSUMPTION: which array axis is 'through-plane' -- never verified per-subject")
+                    help="array axis treated as the through-plane direction: 2 = axial (1.61 mm/voxel), "
+                         "0 / 1 = sagittal / coronal (2.5 mm/voxel). The default 0 is a sagittal scan "
+                         "and a much harsher case than a routine axial one -- see the module docstring")
     ap.add_argument("--slices-per-thick-slab", type=int, default=4,
-                    help="ASSUMPTION: real slice-thickness/gap parameters unknown; this is a placeholder")
+                    help="voxels per thick slice; the gap after each slice is the same size, so slice "
+                         "spacing is twice this (see the module docstring for the mm equivalents). "
+                         "Real clinic parameters are unknown; this is a placeholder")
     ap.add_argument("--out-json", default=None)
     args = ap.parse_args()
 
