@@ -1,5 +1,7 @@
 # Spec: Federated 3D U-Net for Pediatric Brain Tumor Segmentation (Section 01: model_federated)
 
+> **Addendum 3 (2026-09-26) — patch-based full-resolution training and sliding-window inference:** §2, §3, §4 (Req 35-49), §5, §6 and §7 were extended. This is a *forward* plan. The 3D pipeline trains on ONE 96³-downsampled volume per patient per epoch (145 samples, no sampling balance, 2.5 mm in-plane voxels), while the shipped 2D pipeline trains on ~244 full-detail slices per patient (~35k samples, deliberately balanced: at most 30% tumour-free slices, at least 25% containing enhancing tumour). Measured 2026-09-25: the 3D ensemble matches 2D on NC/WT but plateaus at ~0.70 mean Dice without the ET cleanup rule no matter which loss, augmentation or dropout setting is used, and the number of distinct training views per patient is the largest untested difference between the two pipelines. This addendum adds full-resolution cropping ("patches") with the same style of tumour/ET-balanced sampling, plus the sliding-window inference needed to score such a model on whole volumes. It does not change any existing 96³ behaviour.
+>
 > **Addendum 2 (2026-09-25) — input-sequence dropout:** §2, §3, §4 (Req 25-34), §6 and §7 were extended to add random input-sequence ("modality") dropout to the augmentation stack. This is a *forward* plan (unlike Addendum 1, which documented already-built work). Motivation, measured 2026-09-25 on the 81 scoreable held-out subjects with the best 3D checkpoint (mean Dice 0.6814 with all 4 sequences): removing T2-FLAIR drops it to 0.25, T2w to 0.49, T1c to 0.54 (ET 0.39 -> 0.09), T1n to 0.55 — while realistic thick-slice/gap acquisition geometry costs only ~0.005 (routine axial 5 mm/1 mm). A clinic missing one sequence is therefore a far bigger deployment risk than slice geometry, and the model has never seen an absent sequence in training.
 >
 > **Addendum (2026-09-23):** §2, §3, §4 (Req 17-24), §5 and §7 were updated to bring the real 3D data-augmentation stack into this section's scope. The original spec (below, everything else unchanged) said augmentation logic belonged to section 03 and only the hook would live here — that was true while the 2D pipeline was the active model. The project has since started exploring a 3D pipeline (2D progress plateaued; a supervising doctor recommended revisiting 3D), and section 03's augmentation code is slice-based and does not apply to 3D volumes. A 3D augmentation stack was built directly in this section instead, superseding the original out-of-scope line. This addendum documents what was already built and verified, not a forward plan.
@@ -33,6 +35,13 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
   - Draws are independent per sample in a batch and participate in `Compose.set_random_state`, so a fixed seed is reproducible.
   - This zero-channel encoding is also the convention deployment must use for a sequence a clinic does not have.
 - `run.py` gains `--modality-dropout FLOAT` (default `0.0`), passed to `Augment3D(modality_dropout_prob=...)` for both the single-client and federated paths; a positive value without `--use-augmentation` (which would otherwise silently do nothing) is a hard CLI error.
+- **Patch-based full-resolution training (Addendum 3):**
+  - `tools/build_fullres_cache.py`: raw BraTS-PEDs NIfTI (`<raw_dir>/<sid>/<sid>-{t1c,t1n,t2f,t2w,seg}.nii.gz`, 240×240×155 at 1 mm; **no resampling and no reorientation**) → per patient `<out>/<sid>.img.npy` (float16, `(4,X,Y,Z)`, channel order t1c,t1n,t2f,t2w, RAW intensities), `<sid>.seg.npy` (uint8 `(X,Y,Z)`, labels 0-4) and `<sid>.stats.npy` (float32 `(4,2)` = mean, std over voxels > 0 of each raw modality; `(0,1)` for a modality with no voxel > 0). Atomic writes (temp file handle, then rename — `np.save` on a string path silently appends `.npy`), skips patients already present, reports per-patient errors without aborting the batch, uses a process pool, writes `_build_summary.json`, and rejects a patient whose five files disagree on shape or whose labels leave `{0..4}`.
+  - `src/patch_data.py` — `PatchDataset(manifest_path, cache_path, patch_size=(128,128,128), patches_per_epoch, fractions=(0.35,0.45,0.20), seed=42)` over the categories `('et','tumor','random')`. `len` is `patches_per_epoch`; every `__getitem__` draws its OWN patch from an internal numpy `Generator` (the index is ignored, so each epoch sees new patches). Category-first sampling: choose the category by `fractions`; choose a patient uniformly among those ELIGIBLE (et: at least one ET voxel; tumor: at least one voxel with label > 0; random: any); choose a centre voxel (et: a random ET voxel; tumor: a random label > 0 voxel; random: uniform in the volume); patch start = centre − patch//2 + jitter, jitter a uniform integer in `[−patch//4, +patch//4]` per axis, then clipped to `[0, vol − patch]` so the patch always lies fully inside the volume and an et/tumor centre voxel is always inside its patch. Per-patient ET/tumour voxel coordinate lists are computed once at construction (subsampled to at most 4000 each). Crops are read with `np.load(mmap_mode='r')`. Normalisation follows `src/data.py::_zscore_normalize` semantics but with the stored full-volume stats (voxels > 0 → `(v−mean)/std`, or `v−mean` when `std < 1e-8`; every other voxel exactly `0`). Returns `x` float32 `(4,*patch)` and `y` int64 `(*patch)`.
+  - `TrainConfig.data_mode` accepts `'patch'` (requires `cache_path`); new fields `patch_size` (default `(128,128,128)`), `patches_per_epoch` (default 580), `patch_fractions` (default `(0.35,0.45,0.20)`). `data.py::build_dataset` dispatches `'patch'` to `PatchDataset`. `run.py` gains `--data-mode patch`, `--patch-size D H W`, `--patches-per-epoch N`, `--patch-fractions ET TUMOR RANDOM`; patch mode is single-client only. `train_single.py` needs no functional change: an "epoch" is simply `patches_per_epoch` samples through the existing loop, and `Augment3D` + modality dropout apply to patches unchanged.
+  - `src/patch_infer.py` — `predict_volume(model, image, roi_size, overlap=0.5, flips=((),), sw_batch_size=2, device=...)` for a normalised float tensor `(4,X,Y,Z)`: `monai.inferers.sliding_window_inference` with gaussian blending on the segmentation logits `model(x)[0]`, softmax per window, averaged over the flip list after un-flipping; returns float32 probabilities `(5,X,Y,Z)` on the CPU; autocast on CUDA only.
+  - `tools/eval_patch3d.py` — `apply_et_min_voxels(pred, T)` (relabel predicted ET, label 1, to non-enhancing, label 2, when the total predicted ET voxel count is below `T`; `T=0` is the identity; NC = {1,2,3} and WT = {1,2,3,4} are unchanged by 1→2) and `evaluate(checkpoints, cache_path, manifest, roi_size, flips, et_min_voxels_list, save_probs_dir=None)`: full-resolution Dice for ET/NC/WT over the manifest using the full-res cache, one row per threshold, `RESULT_JSON:` line from a CLI wrapper, optional float16 probability maps per patient for later ensembling. Dice comes from `03_augmentation_eval/src/metrics.py`, loaded by file path exactly as `tools/eval_heldout_3d.py` does (both sections have a top-level package named `src`).
+  - Tests use a TINY synthetic cache written in the real file format (a handful of patients around 48×48×40 voxels, patch sizes 16-32), so nothing needs the real data or a GPU.
 - Per-epoch checkpointing to `checkpoints/<run_id>/epoch_<N>.pt` containing model state, optimizer state, epoch number, and (for federation) round number.
 - Resume-from-checkpoint: given a `run_id` (and, for federation, which client), training resumes from the latest saved epoch rather than epoch 0.
 - A minimal CLI/entry point to launch: single-client run, federated run, and resume of either.
@@ -44,6 +53,7 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 - ~~The augmentation transform's internal logic — Mixup or any other technique (section 03).~~ **Superseded by this addendum** — the spatial/intensity augmentation logic now lives here (see §2). Mixup specifically remains out of scope (next bullet), but no longer because it belongs to another section.
 - **Mixup / any cross-sample blending for the 3D pipeline.** The 2D pipeline's mixup blends two 2D slices; a 3D-volume equivalent would blend anatomy at every voxel of a full segmentation target and has never been validated as sane for this task. Left out deliberately, not ported speculatively.
 - **(Addendum 2)** Any change to the model, loss, data loading, federated/CORAL logic, or the default behaviour of any existing flag/transform; a missing-sequence evaluation tool (the 2026-09-25 measurements used a throwaway script outside the repo); sequence-specific or learned dropout probabilities (one scalar `p` for all channels only); dropping anything other than whole input channels; and **any claim that dropout improves held-out or missing-sequence Dice** — verifying that needs a real training run plus evaluation, not this spec's tests.
+- **(Addendum 3)** The federated/CORAL path in patch mode; any change to the model, loss, `Augment3D` logic, or the existing 96³ `dummy`/`real` behaviour (including Req 10's interrupt-and-resume determinism, which continues to apply to those modes only); multi-process `DataLoader` workers; a missing-sequence evaluation tool; 2D+3D ensembling scripts (they stay outside the repo); resampling, registration or skull-stripping of any kind; and **any claim that patch training improves held-out Dice** — that needs a real training run plus an evaluation, not this spec's tests.
 - Final ablation-matrix result generation and the results CSV (section 03).
 - Any real `.nii.gz` I/O testing (no real data cache exists yet) — real-mode code path is written but only exercised once the cache lands; this build validates it structurally, not against real files.
 - Streamlit demo / any UI (section 05).
@@ -88,6 +98,26 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 32. A `B = 16` batch of identical samples with `p = 0.5` produces drop patterns that are not all identical across the samples (independent per-sample draws).
 33. `run.py --modality-dropout FLOAT` exists with default `0.0`. A value `> 0` without `--use-augmentation`, or any value outside `[0.0, 1.0)`, exits through an argparse error (`SystemExit` code 2) whose message names the offending flag(s), before any data loading or training. With `--use-augmentation --modality-dropout 0.2` the transform handed to training has dropout enabled at 0.2 (inspectable on its `Compose`) at both the single-client and federated call sites; with `--use-augmentation` alone it has no dropout transform (unchanged behaviour).
 34. `train_single_client` runs at least 1 epoch on dummy data with a real (not mocked) `Augment3D(modality_dropout_prob=0.3)` and finishes with a finite loss. **No claim is made or tested about held-out Dice or missing-sequence robustness** — that requires a real training run and evaluation, outside this spec's tests.
+35. `tools/build_fullres_cache.py`, given a synthetic NIfTI patient with known small volumes, writes `<sid>.img.npy` (float16 `(4,X,Y,Z)`, channel order t1c,t1n,t2f,t2w, equal to the raw data within float16 rounding), `<sid>.seg.npy` (uint8 `(X,Y,Z)`, exactly equal to the raw labels) and `<sid>.stats.npy` (float32 `(4,2)`, equal to the mean/std of the voxels > 0 of each RAW modality with rtol 1e-4; a modality with no voxel > 0 gets `(0,1)`).
+36. The builder is safe and restartable: no `*.tmp` file and no partial `.npy` remains after a run; a second run reports the patients as skipped and leaves their files untouched (modification times unchanged); a patient with a missing file, mismatched shapes among the five files, or labels outside `{0..4}` is reported as an error, leaves NO output files, and does not stop the other patients from being built; `_build_summary.json` lists ok / skipped / errors.
+37. `len(PatchDataset)` equals `patches_per_epoch`, and every item has `x` float32 of shape `(4,*patch)` and `y` int64 of shape `patch` with values a subset of `{0,1,2,3,4}`.
+38. Normalisation and alignment: for a sampled patch, `x` equals an independent computation from the raw crop and the stored stats (voxels > 0 → `(v−mean)/std`, or `v−mean` when `std < 1e-8`; every other voxel exactly `0.0`), and `x` and `y` come from the SAME crop — verified on a synthetic volume whose image values encode voxel position, by locating the crop in the source volume and matching both `x` and `y` against it exactly.
+39. Category sampling: with `fractions=(0.35,0.45,0.20)` over at least 2000 draws on a synthetic cohort, the observed rate of each category is within ±0.05 of its fraction (the chosen category and patient are observable through a documented method so this is testable).
+40. Sampling guarantees, checked on every draw of at least 2000: an `et` patch contains at least one ET voxel and only ever comes from a patient that has ET; a `tumor` patch contains at least one voxel with label > 0; every patch lies fully inside the volume (`start >= 0` and `start + patch <= volume shape` on every axis).
+41. Reproducibility: two datasets built with the same seed return bitwise-identical first 20 samples; different seeds return different samples; and successive `__getitem__` calls (the same index) return different patches.
+42. Construction-time validation, each with a clear error: a patch dimension that is not a multiple of 16 → `ValueError`; a patch larger than the volume on any axis → `ValueError`; a missing cache file → `FileNotFoundError` naming the path; a category with positive fraction and no eligible patient → `ValueError`; fractions that are negative or do not sum to 1 (tolerance 1e-6) → `ValueError`.
+43. `predict_volume` stitches correctly: with a pointwise (1×1×1 convolution) stub model and a volume whose shape is not divisible by the window size or the stride, the output equals the direct full-volume softmax (atol 1e-5), has shape `(5,X,Y,Z)`, dtype float32, lives on the CPU, and sums to 1 over the class axis (atol 1e-5).
+44. Flip test-time augmentation is aligned: with the same pointwise stub, `flips=[(),(0,),(1,),(2,)]` gives the same probabilities as no flips (atol 1e-5) — a wrong un-flip would misalign positions and fail.
+45. `TrainConfig` accepts `data_mode='patch'` with a `cache_path`; `'patch'` without `cache_path`, a `patch_size` that is not three positive integers, `patches_per_epoch < 1`, or invalid `patch_fractions` raises `ValueError`; the defaults and behaviour of the existing `dummy`/`real` modes are unchanged (Req 1-34 keep passing unmodified).
+46. `run.py --data-mode patch --patch-size D H W --patches-per-epoch N --patch-fractions ET TUMOR RANDOM` reaches training with those values in the config; combining patch mode with `--use-federation` exits through an argparse error (`SystemExit` code 2) before any data is loaded; existing invocations behave as before.
+47. End to end: `train_single_client` runs at least 1 epoch in patch mode with a real `Augment3D(modality_dropout_prob=0.3)` on the tiny synthetic cache, finishes with a finite loss, and writes a checkpoint. No held-out-Dice claim is made or tested.
+48. `apply_et_min_voxels(pred, T)`: when the total ET voxel count is below `T`, every label-1 voxel becomes 2 and nothing else changes; at or above `T` the array is unchanged; `T=0` is the identity; the input array is never mutated in place.
+49. `evaluate()` on the tiny synthetic cache with a freshly built tiny-run checkpoint returns, for each threshold in the list, mean/ET/NC/WT Dice all in `[0,1]`, with NC and WT identical across thresholds; and the CLI's `RESULT_JSON:` line parses as JSON.
+
+**Assumption (Addendum 3):** The sampling defaults (35% ET-centred, 45% tumour-centred, 20% uniformly random patches) mirror the 2D pipeline's slice expansion (a floor on ET-containing slices, a ceiling on tumour-free ones); they are a judgment call, not tuned. `patches_per_epoch = 580` is about four patches per training patient and is likewise only a default.
+**Assumption (Addendum 3):** The full-resolution cache lives outside the repository (about 20 GB for all 257 patients) and is built once; `nibabel` is needed by the builder tool only and is not added to the training requirements.
+**Assumption (Addendum 3):** The `DataLoader` keeps `num_workers=0`, so the dataset's internal generator is a single stream. Resume does not restore that stream, so patch mode is not bitwise-resumable (Req 10 covers the 96³ modes only); an epoch after resume simply draws fresh patches.
+**Assumption (Addendum 3):** Sliding-window inference defaults (50% overlap, gaussian blending) are the standard choices, not tuned; the window size equals the training patch size.
 
 **Assumption:** FedAvg round/local-epoch counts, learning rate, and optimizer are exposed as config parameters with reasonable defaults (Adam, lr=1e-3, 1 local epoch/round, 2 rounds for smoke tests) rather than fixed — no spec constraint dictates specific values.
 **Assumption:** `features` is produced by global-average-pooling the U-Net bottleneck activation map to a 1D vector; exact dimensionality is an implementation default, not contractually fixed.
@@ -110,13 +140,18 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 ├── src/
 │   ├── __init__.py
 │   ├── model.py            # 3D U-Net wrapper: model(x) -> (seg_logits, features)
-│   ├── data.py             # Manifest-driven Dataset: dummy-tensor mode + real .nii.gz mode
+│   ├── data.py             # Manifest-driven Dataset: dummy-tensor mode + real .nii.gz mode; dispatches 'patch' (addendum 3)
+│   ├── patch_data.py       # PatchDataset: full-res, tumour/ET-balanced random crops (addendum 3)
+│   ├── patch_infer.py      # predict_volume: sliding-window (+ flip TTA) inference (addendum 3)
 │   ├── augment3d.py        # 3D MONAI augmentation stack + Augment3D callable (addendum); + RandModalityDropoutd (addendum 2)
 │   ├── train_single.py     # Single-client training loop
 │   ├── federated.py        # FedAvg orchestration: local training + weighted aggregation
 │   ├── checkpoint.py        # save/load/resume helpers
 │   └── config.py           # Config dataclass/CLI: use_augmentation, use_federation, use_domain_adaptation, etc.
 ├── run.py                  # CLI entry point (single-client / federated / resume); builds Augment3D() when --use-augmentation is set; --modality-dropout (addendum 2)
+├── tools/
+│   ├── build_fullres_cache.py  # raw NIfTI -> full-res .npy cache + stats (addendum 3)
+│   └── eval_patch3d.py         # full-res sliding-window held-out Dice + ET rule (addendum 3)
 ├── checkpoints/            # Created at runtime, gitignored
 └── tests/
     ├── test_model.py
@@ -124,7 +159,11 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
     ├── test_single_client.py
     ├── test_federated.py
     ├── test_checkpoint.py
-    └── test_augment3d.py   # addendum; + sequence-dropout tests and CLI validation (addendum 2)
+    ├── test_augment3d.py   # addendum; + sequence-dropout tests and CLI validation (addendum 2)
+    ├── test_build_fullres_cache.py  # addendum 3
+    ├── test_patch_data.py           # addendum 3 (+ config / CLI validation, end-to-end training)
+    ├── test_patch_infer.py          # addendum 3
+    └── test_eval_patch3d.py         # addendum 3
 ```
 
 ## 6. Edge Cases
@@ -149,6 +188,15 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 | `--modality-dropout 0.2` given without `--use-augmentation` | argparse error naming both flags, before any data loading or training (would otherwise silently do nothing) |
 | A draw would drop every input channel | One channel, chosen uniformly at random, is kept; the model never receives an all-zero input |
 | Input has fewer than 4 channels (e.g. 1) | Same rule applies: a lone channel is never dropped |
+| Patch size not a multiple of 16, or larger than the volume | `ValueError` at construction naming the offending size/axis (the UNet has 4 stride-2 stages) |
+| Cache file missing for a manifest patient | `FileNotFoundError` naming the path, at construction, before any training |
+| `--data-mode patch` given without `--cache-path` | Same `ValueError` as `real` mode ("requires an explicit cache_path") |
+| `--data-mode patch` together with `--use-federation` | argparse error (exit 2), before any data loading |
+| No manifest patient has ET but `fractions[0] > 0` (or none has any tumour but `fractions[1] > 0`) | `ValueError` naming the empty category — never a silent renormalisation |
+| Builder meets a corrupt/mismatched patient | That patient is reported as an error with no output files; the rest still build |
+| Builder killed mid-write | No partial `.npy` and no `.tmp` is left as a valid-looking file; a rerun rebuilds only the missing patients |
+| A volume is smaller than the sliding window on an axis | `predict_volume` still returns a full `(5,X,Y,Z)` result (the inferer pads); no crash |
+| `apply_et_min_voxels` receives an array with no ET | Returned unchanged |
 
 ## 7. Done Checklist
 - [x] Req 1: `model(x)` returns `(seg_logits, features)` with correct shapes for `(batch, 4, 96, 96, 96)` input
@@ -185,3 +233,18 @@ A MONAI 3D U-Net trained from scratch that exposes `(seg_logits, features)`, run
 - [x] Req 32: `B=16` identical samples at `p=0.5` do not all get the same drop pattern
 - [x] Req 33: `run.py --modality-dropout` default 0.0; `>0` without `--use-augmentation` or out-of-range exits with argparse error (code 2); with `--use-augmentation` the transform has dropout at the given value (both call sites); without the flag, none
 - [x] Req 34: end-to-end `train_single_client` 1 epoch with real `Augment3D(modality_dropout_prob=0.3)` gives a finite loss — no held-out-Dice claim
+- [x] Req 35: full-res cache builder writes correct `.img.npy` / `.seg.npy` / `.stats.npy` for a synthetic NIfTI patient
+- [x] Req 36: builder is atomic, skips existing patients, isolates bad patients (no output files), writes `_build_summary.json`
+- [x] Req 37: `PatchDataset` length, `x` float32 `(4,*patch)`, `y` int64 `(*patch)` with labels in {0..4}
+- [x] Req 38: `x` equals independent normalisation of the raw crop (background exactly 0); `x` and `y` come from the same crop
+- [x] Req 39: category rates within ±0.05 of the fractions over >= 2000 draws
+- [x] Req 40: et patches always contain ET (from ET patients only), tumor patches contain tumour, every patch fully inside the volume
+- [x] Req 41: same-seed bitwise reproducibility, different seeds differ, successive calls differ
+- [x] Req 42: all construction-time validation errors (patch size, too large, missing file, empty category, bad fractions)
+- [x] Req 43: sliding-window with a pointwise stub equals the direct full-volume softmax; shape/dtype/CPU/sums-to-1
+- [x] Req 44: flip TTA with the pointwise stub equals no-TTA (un-flip alignment)
+- [x] Req 45: `TrainConfig` patch fields validated; existing modes and defaults unchanged
+- [x] Req 46: `run.py` patch flags reach the config; patch + federation is an argparse error (exit 2)
+- [x] Req 47: end-to-end `train_single_client` in patch mode with real `Augment3D` + dropout: finite loss, checkpoint written
+- [x] Req 48: `apply_et_min_voxels` semantics (1→2 below threshold, identity at/above and at T=0, no in-place mutation)
+- [x] Req 49: `evaluate()` returns Dice in [0,1] per threshold, NC/WT identical across thresholds; `RESULT_JSON:` parses

@@ -105,7 +105,11 @@ def train_single_client(
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
     loss_fn = _build_loss(loss_kind)
 
-    dataset = build_dataset(manifest_path, data_mode=config.data_mode, cache_path=config.cache_path)
+    dataset = build_dataset(
+        manifest_path, data_mode=config.data_mode, cache_path=config.cache_path,
+        patch_size=config.patch_size, patches_per_epoch=config.patches_per_epoch,
+        patch_fractions=config.patch_fractions, patch_seed=config.seed,
+    )
     loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
     start_epoch = 0

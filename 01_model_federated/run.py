@@ -18,7 +18,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--use-augmentation", action="store_true")
     p.add_argument("--use-federation", action="store_true")
     p.add_argument("--use-domain-adaptation", action="store_true")
-    p.add_argument("--data-mode", choices=["dummy", "real"], default="dummy")
+    p.add_argument("--data-mode", choices=["dummy", "real", "patch"], default="dummy")
     p.add_argument("--cache-path", default=None)
     p.add_argument("--manifest", default=f"{DEFAULT_MANIFEST_DIR}/hospitalA.json",
                     help="Manifest to use for a single-client run")
@@ -42,6 +42,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--loss", choices=["dice_ce", "dice_focal"], default="dice_ce",
                     help="single-client only: dice_focal down-weights easy/majority voxels, "
                          "a standard fix for the rare-class (ET) under-segmentation dice_ce shows")
+    p.add_argument("--patch-size", type=int, nargs=3, default=[128, 128, 128], metavar=("D", "H", "W"),
+                    help="--data-mode patch only: crop size in voxels, each a multiple of 16")
+    p.add_argument("--patches-per-epoch", type=int, default=580,
+                    help="--data-mode patch only: patches drawn per epoch")
+    p.add_argument("--patch-fractions", type=float, nargs=3, default=[0.35, 0.45, 0.20],
+                    metavar=("ET", "TUMOR", "RANDOM"),
+                    help="--data-mode patch only: share of ET-centred / tumour-centred / random patches (sum 1)")
     p.add_argument("--modality-dropout", type=float, default=0.0,
                     help="per-sequence probability of zeroing a whole input channel during augmentation, "
                          "in [0.0, 1.0); requires --use-augmentation")
@@ -53,6 +60,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if not (0.0 <= args.modality_dropout < 1.0):  # also rejects NaN
         parser.error(f"--modality-dropout must be in [0.0, 1.0), got {args.modality_dropout}")
+    if args.data_mode == "patch" and args.use_federation:
+        parser.error("--data-mode patch is single-client only; it cannot be combined with --use-federation")
     if args.modality_dropout > 0.0 and not args.use_augmentation:
         parser.error("--modality-dropout requires --use-augmentation "
                      "(it is applied by the augmentation transform and would silently do nothing)")
@@ -68,6 +77,9 @@ def main() -> None:
         use_domain_adaptation=args.use_domain_adaptation,
         data_mode=args.data_mode,
         cache_path=args.cache_path,
+        patch_size=tuple(args.patch_size),
+        patches_per_epoch=args.patches_per_epoch,
+        patch_fractions=tuple(args.patch_fractions),
         lr=args.lr,
         coral_weight=args.coral_weight,
         coral_queue_size=args.coral_queue_size,
