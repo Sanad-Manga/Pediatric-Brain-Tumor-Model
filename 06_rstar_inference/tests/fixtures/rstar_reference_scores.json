@@ -1,0 +1,23 @@
+{
+  "_comment": "R* per-patient Dice from the 2026-09-26 post-hoc run on fresh-30 (2D+3D 50/50, background x0.5, ET rule 500 mm3). et = ET Dice after the rule; empty ET counts as 1.0 when both are empty.",
+  "patients": {
+    "BraTS-PED-00077-000": {
+      "nc": 0.8740472962795601,
+      "wt": 0.8727064910064368,
+      "et": 1.0,
+      "true_et_voxels": 0
+    },
+    "BraTS-PED-00103-000": {
+      "nc": 0.8362308056551444,
+      "wt": 0.8362308056551444,
+      "et": 0.6673076923076923,
+      "true_et_voxels": 1213
+    },
+    "BraTS-PED-00136-000": {
+      "nc": 0.6305638968273629,
+      "wt": 0.6771215574182085,
+      "et": 0.8004155304505909,
+      "true_et_voxels": 12928
+    }
+  }
+}

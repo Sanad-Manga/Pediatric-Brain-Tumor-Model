@@ -1,0 +1,30 @@
+{
+  "_comment": "Checkpoints are not in git. Paths are relative to the models root (RSTAR_MODELS_ROOT, else the repo root); the SHA-256 is verified before a file is opened.",
+  "ensemble_2d": {
+    "name": "shipped_2d_ensemble",
+    "path": "03_augmentation_eval/checkpoints/overnight_run/best.pt",
+    "sha256": "627d0cc742827815e0ecd80541d5ccfcc91fa518e9e24e2058f1bb91b3016967"
+  },
+  "family_3d": [
+    {
+      "name": "3d_A_focal_dropout15_ep262",
+      "path": "01_model_federated/checkpoints_best/session2_A_focal_seqdrop_final_ep262.pt",
+      "sha256": "b56a5462c11e7fb5b3420610564ee8e411253287e5bfc9267a90e4315721011e"
+    },
+    {
+      "name": "3d_C_ce_dropout15_ep125",
+      "path": "01_model_federated/checkpoints_best/session2_C_ce_seqdrop_final_ep125.pt",
+      "sha256": "2a5c94b26f1af17045d8b07a97c58be8a9093d8cb8ad9dc8822a94ceab77ac04"
+    },
+    {
+      "name": "3d_D_focal_dropout25_ep224",
+      "path": "01_model_federated/checkpoints_best/session3_D_focal_sd25_final_ep224.pt",
+      "sha256": "7463f62e1cf4f01a1f95c2697cd7c36f82e54a6725b7daaee603b3cf607c5e29"
+    },
+    {
+      "name": "3d_E_ce_dropout25_ep317",
+      "path": "01_model_federated/checkpoints_best/session3_E_ce_sd25_final_ep317.pt",
+      "sha256": "69f0a57e1675b0a310acddbd14db1acafd216fe1ac4d3c8198c9fde283cd4617"
+    }
+  ]
+}
