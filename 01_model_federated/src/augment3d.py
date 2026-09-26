@@ -122,6 +122,99 @@ class RandModalityDropoutd(RandomizableTransform, MapTransform):
         return d
 
 
+def _validate_shift_prob(p: float) -> float:
+    p = float(p)
+    if not (0.0 <= p <= 1.0):  # also rejects NaN
+        raise ValueError(f"sequence_shift_prob must be in [0.0, 1.0], got {p!r}")
+    return p
+
+
+def _validate_max_shift(v: float) -> float:
+    v = float(v)
+    if not np.isfinite(v) or v < 0.0:
+        raise ValueError(f"sequence_shift_max_voxels must be a finite number >= 0, got {v!r}")
+    return v
+
+
+def _translate_channel(chan: torch.Tensor, shift) -> torch.Tensor:
+    """Translate one (D, H, W) float32 channel by `shift` voxels per axis: out[x] = in[x - s].
+
+    Bilinear resampling with torch's grid_sample; a voxel whose source location lies outside the
+    volume is exactly 0 (forced, so vacated voxels never carry interpolation noise). An integer
+    shift therefore equals np.roll on the interior, and a sub-voxel shift interpolates linearly.
+    """
+    axes = []
+    valid = []
+    for n, s in zip(chan.shape, shift):
+        pos = torch.arange(n, dtype=torch.float64) - float(s)           # source index for every output index
+        valid.append((pos >= 0.0) & (pos <= n - 1))
+        norm = 2.0 * pos / (n - 1) - 1.0 if n > 1 else torch.zeros(n, dtype=torch.float64)
+        axes.append(norm.to(torch.float32))
+    gz, gy, gx = torch.meshgrid(axes[0], axes[1], axes[2], indexing="ij")
+    grid = torch.stack([gx, gy, gz], dim=-1)[None]                       # (1, D, H, W, 3), last dim = (x=W, y=H, z=D)
+    out = torch.nn.functional.grid_sample(
+        chan[None, None], grid, mode="bilinear", padding_mode="zeros", align_corners=True
+    )[0, 0]
+    inside = valid[0][:, None, None] & valid[1][None, :, None] & valid[2][None, None, :]
+    return torch.where(inside, out, torch.zeros_like(out))
+
+
+class RandSequenceShiftd(RandomizableTransform, MapTransform):
+    """Simulate imperfect co-registration between MRI sequences.
+
+    With probability `prob` (one draw per call) one reference channel is chosen uniformly at random
+    and never moved; each other channel is selected independently with probability 0.5 (if none is,
+    one of the others is chosen uniformly, so an applied call always moves at least one channel).
+    Every selected channel gets its own translation, uniform in [-max_shift_voxels, +max_shift_voxels]
+    on each axis (float, sub-voxel allowed). The label is not an input of this transform.
+
+    Runs after the intensity transforms and before RandModalityDropoutd, which must stay last so a
+    dropped channel is still exactly 0. The input is z-scored with background 0, so the zero fill
+    of the vacated voxels matches the background.
+    """
+
+    def __init__(self, keys, prob: float, max_shift_voxels: float, allow_missing_keys: bool = False):
+        MapTransform.__init__(self, keys, allow_missing_keys)
+        RandomizableTransform.__init__(self, 1.0)
+        self.prob = _validate_shift_prob(prob)
+        self.max_shift_voxels = _validate_max_shift(max_shift_voxels)
+
+    def randomize(self, n_channels: int):
+        """Draw the plan: (reference index, (C, 3) shifts). Not applied -> (-1, all zeros)."""
+        if n_channels < 2:
+            raise ValueError(f"sequence shift needs at least 2 channels, got {n_channels}")
+        shifts = np.zeros((n_channels, 3), dtype=np.float64)
+        if not self.R.random_sample() < self.prob:
+            return -1, shifts
+        reference = int(self.R.randint(n_channels))
+        others = [c for c in range(n_channels) if c != reference]
+        hits = self.R.random_sample(n_channels) < 0.5
+        selected = [c for c in others if hits[c]]
+        if not selected:
+            selected = [others[int(self.R.randint(len(others)))]]
+        vectors = self.R.uniform(-self.max_shift_voxels, self.max_shift_voxels, size=(n_channels, 3))
+        for c in selected:
+            shifts[c] = vectors[c]
+        return reference, shifts
+
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.key_iterator(d):
+            img = d[key]
+            n_channels = img.shape[0]
+            if n_channels < 2:
+                raise ValueError(f"sequence shift needs at least 2 channels, got {n_channels}")
+            _reference, shifts = self.randomize(n_channels)
+            is_tensor = isinstance(img, torch.Tensor)
+            out = img.clone() if is_tensor else np.array(img, copy=True)
+            for c in np.flatnonzero(np.any(shifts != 0.0, axis=1)):
+                chan = img[c] if is_tensor else torch.from_numpy(np.ascontiguousarray(img[c]))
+                moved = _translate_channel(chan.detach().to(torch.float32).cpu(), shifts[c])
+                out[c] = moved.to(img.dtype).to(img.device) if is_tensor else moved.numpy().astype(img.dtype)
+            d[key] = out
+        return d
+
+
 def build_transforms3d(
     flip_prob: float = 0.5,
     rotate_prob: float = 0.3,
@@ -137,6 +230,8 @@ def build_transforms3d(
     gaussian_noise_std: float = 0.05,
     seed: int | None = None,
     modality_dropout_prob: float = 0.0,
+    sequence_shift_prob: float = 0.0,
+    sequence_shift_max_voxels: float = 1.2,
 ) -> Compose:
     """Build the 3D augmentation stack. Always returns a real Compose --
     the "off" case is handled by the caller never building/using one, same
@@ -145,8 +240,15 @@ def build_transforms3d(
     `modality_dropout_prob` > 0 appends RandModalityDropoutd as the last image
     transform; the default 0.0 adds nothing, leaving the chain exactly as it
     was before sequence dropout existed.
+
+    `sequence_shift_prob` > 0 inserts RandSequenceShiftd after the intensity
+    transforms and before RandModalityDropoutd (Addendum 4); the shift is in voxels of
+    the grid being trained on (1.2 voxels is about 3 mm in-plane on the 96^3 grid). The
+    default 0.0 adds nothing.
     """
     modality_dropout_prob = _validate_dropout_prob(modality_dropout_prob)
+    sequence_shift_prob = _validate_shift_prob(sequence_shift_prob)
+    sequence_shift_max_voxels = _validate_max_shift(sequence_shift_max_voxels)
     keys = [IMAGE_KEY, LABEL_KEY]
     rotate_rad = float(np.deg2rad(rotate_range_deg))
 
@@ -176,6 +278,9 @@ def build_transforms3d(
         RandShiftIntensityd(keys=IMAGE_KEY, offsets=shift_intensity_offset, prob=shift_intensity_prob),
         RandGaussianNoised(keys=IMAGE_KEY, prob=gaussian_noise_prob, mean=0.0, std=gaussian_noise_std),
     ]
+    if sequence_shift_prob > 0.0:
+        transforms.append(RandSequenceShiftd(
+            keys=IMAGE_KEY, prob=sequence_shift_prob, max_shift_voxels=sequence_shift_max_voxels))
     if modality_dropout_prob > 0.0:
         transforms.append(RandModalityDropoutd(keys=IMAGE_KEY, drop_prob=modality_dropout_prob))
     transforms.append(AssertLabelValuesd(keys=LABEL_KEY, valid_labels=VALID_LABELS))
