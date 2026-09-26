@@ -118,5 +118,17 @@ def build_dataset(
     data_mode: str = "dummy",
     cache_path: str | None = None,
     seed: int = 42,
-) -> BraTSPedsDataset:
+    patch_size=(128, 128, 128),
+    patches_per_epoch: int = 580,
+    patch_fractions=(0.35, 0.45, 0.20),
+    patch_seed: int = 42,
+) -> Dataset:
+    if data_mode == "patch":
+        if not cache_path:
+            raise ValueError("data_mode='patch' requires an explicit cache_path")
+        from .patch_data import PatchDataset  # local import: patch_data imports this module
+
+        return PatchDataset(manifest_path, cache_path, patch_size=patch_size,
+                            patches_per_epoch=patches_per_epoch, fractions=patch_fractions,
+                            seed=patch_seed)
     return BraTSPedsDataset(manifest_path, mode=data_mode, cache_path=cache_path, seed=seed)
