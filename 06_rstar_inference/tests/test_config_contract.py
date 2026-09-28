@@ -94,6 +94,27 @@ def test_negative_voxels_are_background_up_to_a_limit(fraction, outcome):
     assert (warnings == []) if outcome == "silent" else (len(warnings) == 1 and "negative" in warnings[0] and "t1c" in warnings[0])
 
 
+def test_negative_fraction_at_the_exact_boundaries():
+    # TINY's voxel count (107520) isn't divisible by 100, so 1% can't land exactly there; use a grid that is.
+    shape = (10, 10, 4)                                                   # 400 voxels: 1% = 4, 5% = 20, just over 5% = 21
+    cfg = tiny_config(expected_shape=shape)
+    vol, _ = make_volume(shape=shape)
+    brain_idx = np.flatnonzero(vol[0] > 0)
+    assert len(brain_idx) >= 21, "need enough brain voxels in channel 0 to place the negative ones"
+
+    def with_negative(count):
+        v = vol.copy()
+        v[0].reshape(-1)[brain_idx[:count]] = -50.0
+        return v
+
+    present, warnings = validate_input(with_negative(4), None, cfg)       # exactly 1%: silent
+    assert present[0] and warnings == []
+    present, warnings = validate_input(with_negative(20), None, cfg)      # exactly 5%: warns, does not error
+    assert present[0] and len(warnings) == 1 and "negative" in warnings[0]
+    with pytest.raises(ContractError, match="negative"):                  # just over 5%: error
+        validate_input(with_negative(21), None, cfg)
+
+
 def test_a_present_sequence_that_is_all_zero_raises_and_names_it():
     vol, _ = make_volume()
     vol[2] = 0.0
@@ -120,6 +141,16 @@ def test_zero_fraction_just_under_the_error_limit_raises_and_just_over_only_warn
     assert len(validate_input(vol, None, tiny_config())[1]) == 1
     vol[0] = _zero_fraction_channel(0.26)
     assert validate_input(vol, None, tiny_config())[1] == []
+
+
+def test_zero_fraction_at_the_exact_boundaries():
+    # 0.15 and 0.25 divide TINY's voxel count exactly, so these hit the boundary itself, not just nearby.
+    vol, _ = make_volume()
+    vol[0] = _zero_fraction_channel(0.15)
+    present, warnings = validate_input(vol, None, tiny_config())          # spec: [0.15, 0.25) warns, does not error
+    assert present[0] and len(warnings) == 1 and "t1c" in warnings[0]
+    vol[0] = _zero_fraction_channel(0.25)
+    assert validate_input(vol, None, tiny_config())[1] == []              # spec: 0.25 itself is clean
 
 
 @pytest.mark.parametrize("present", [(True, True, True), (1, 1, 1, 1), "tttt", 5])
