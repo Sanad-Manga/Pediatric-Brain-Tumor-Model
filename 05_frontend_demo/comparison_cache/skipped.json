@@ -1,0 +1,14 @@
+[
+  {
+    "patient_id": "BraTS-PED-00028-000",
+    "reason": "sequence t2w has only 14% exactly-zero voxels, so it looks like it is not skull-stripped (BraTS volumes are 30-60% background); skull-strip the scan first"
+  },
+  {
+    "patient_id": "BraTS-PED-00030-000",
+    "reason": "sequence t1c has only 12% exactly-zero voxels, so it looks like it is not skull-stripped (BraTS volumes are 30-60% background); skull-strip the scan first"
+  },
+  {
+    "patient_id": "BraTS-PED-00099-000",
+    "reason": "sequence t1c has only 7% exactly-zero voxels, so it looks like it is not skull-stripped (BraTS volumes are 30-60% background); skull-strip the scan first"
+  }
+]
