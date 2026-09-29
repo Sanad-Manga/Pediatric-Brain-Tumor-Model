@@ -5,7 +5,7 @@
   "rstar_warnings": [
     "sequence t2f has only 23% exactly-zero voxels; check that the scan is skull-stripped"
   ],
-  "rstar_agreement": 0.9456228588089511,
+  "rstar_agreement": 0.945621867881549,
   "regions": {
     "2d": {
       "ET": {
@@ -14,13 +14,13 @@
         "recall": 0.0298
       },
       "NC": {
-        "dice": 0.9712,
-        "precision": 0.9581,
+        "dice": 0.9713,
+        "precision": 0.9582,
         "recall": 0.9848
       },
       "WT": {
-        "dice": 0.9712,
-        "precision": 0.9581,
+        "dice": 0.9713,
+        "precision": 0.9582,
         "recall": 0.9848
       }
     },
@@ -49,12 +49,12 @@
       },
       "NC": {
         "dice": 0.9559,
-        "precision": 0.9221,
+        "precision": 0.9222,
         "recall": 0.9922
       },
       "WT": {
         "dice": 0.9559,
-        "precision": 0.9221,
+        "precision": 0.9222,
         "recall": 0.9922
       }
     }

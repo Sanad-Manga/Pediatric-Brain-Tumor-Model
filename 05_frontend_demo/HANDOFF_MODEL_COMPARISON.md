@@ -26,8 +26,11 @@ both) — next to each other, with the accuracy numbers for each.
 
 ## The data package: `comparison_cache/`
 
-Already generated for the first 4 of 7 original demo patients (`precompute_comparison.py` in this
-folder produced it — re-run it, or ask for the rest, to extend the set). Per patient:
+Generated for **14 patients** (`precompute_comparison.py` in this folder produced it): the 4 original
+demo patients that pass the input check, plus 10 picked to show the real spread — a near-total
+failure (00188), ET-miss cases (00191, 00108, 00092), a large badly-segmented tumor (00156), a
+moderate struggle (00004), clean wins (00190, 00257, 00009) and a correctly-empty-ET case (00212).
+The reason each was picked is a comment next to its ID in the script's `PATIENTS` list. Per patient:
 
 ```
 comparison_cache/<patient_id>/
@@ -61,6 +64,14 @@ tumor) — same convention the rest of the app already uses.
 **No raw scans ship in this package** (only label volumes and numbers), but the demo cache already
 in the repo (`05_frontend_demo/demo_cache/<patient_id>/axial/slice_*.npz`) has the actual MRI slices
 to render as the background image under each segmentation overlay — reuse it, don't re-fetch data.
+
+> **Gap to decide on (yours):** `demo_cache/` only has MRI slices for the original demo patients
+> (00021, 00051, 00093, 00230 among the 14), and only for selected slice indices. The 10 newer
+> patients have labels + metrics but **no background image anywhere in the repo**. Measured for
+> reference: all 4 sequences of one patient as uint8 (0.5–99.5 percentile windowed) are ~16 MB
+> compressed, FLAIR + T1c alone ~8 MB, the ground-truth mask ~0.04 MB. How to handle it (ship a
+> display image in the package, show only the demo-cache patients with images, labels-only view…) is
+> a UI decision — ask Ahmed for a precompute change if you need one.
 
 ## ⚠️ Known issue: patient selection isn't "any patient"
 
