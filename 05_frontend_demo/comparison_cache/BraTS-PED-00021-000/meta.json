@@ -1,0 +1,62 @@
+{
+  "patient_id": "BraTS-PED-00021-000",
+  "rstar_mode": "R*",
+  "rstar_status": "ok",
+  "rstar_warnings": [
+    "sequence t1c has only 19% exactly-zero voxels; check that the scan is skull-stripped"
+  ],
+  "rstar_agreement": 0.9015639570511284,
+  "regions": {
+    "2d": {
+      "ET": {
+        "dice": 0.9301,
+        "precision": 0.9129,
+        "recall": 0.9479
+      },
+      "NC": {
+        "dice": 0.8628,
+        "precision": 0.8279,
+        "recall": 0.9006
+      },
+      "WT": {
+        "dice": 0.9458,
+        "precision": 0.9552,
+        "recall": 0.9365
+      }
+    },
+    "3d": {
+      "ET": {
+        "dice": 0.7709,
+        "precision": 0.833,
+        "recall": 0.7175
+      },
+      "NC": {
+        "dice": 0.7217,
+        "precision": 0.7136,
+        "recall": 0.7301
+      },
+      "WT": {
+        "dice": 0.8874,
+        "precision": 0.9302,
+        "recall": 0.8484
+      }
+    },
+    "rstar": {
+      "ET": {
+        "dice": 0.9149,
+        "precision": 0.9057,
+        "recall": 0.9243
+      },
+      "NC": {
+        "dice": 0.8199,
+        "precision": 0.7691,
+        "recall": 0.878
+      },
+      "WT": {
+        "dice": 0.9361,
+        "precision": 0.9202,
+        "recall": 0.9525
+      }
+    }
+  }
+}
