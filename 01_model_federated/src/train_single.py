@@ -13,6 +13,7 @@ from .checkpoint import load_checkpoint, prune_old_checkpoints, save_checkpoint
 from .config import TrainConfig
 from .data import build_dataset
 from .model import FederatedUNet3D, build_model
+from .region_loss import RegionDiceBCELoss
 
 
 def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
@@ -38,12 +39,17 @@ def _build_loss(loss_kind: str):
     already classifies confidently (gamma=2.0, MONAI's default) so the loss
     stops being dominated by the easy majority-class voxels ET is drowned out
     by; a standard fix for exactly this class-imbalance symptom.
+
+    region_dice_bce (SPEC.md Addendum 5): Dice + BCE on the three scored regions (WT/TC/ET), read
+    off the same 5-way softmax by summing probabilities -- see region_loss.py.
     """
     if loss_kind == "dice_ce":
         return DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)
     if loss_kind == "dice_focal":
         return DiceFocalLoss(to_onehot_y=True, softmax=True, include_background=True, gamma=2.0)
-    raise ValueError(f"loss_kind must be 'dice_ce' or 'dice_focal', got {loss_kind!r}")
+    if loss_kind == "region_dice_bce":
+        return RegionDiceBCELoss()
+    raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal' or 'region_dice_bce', got {loss_kind!r}")
 
 
 def _apply_augmentation(
