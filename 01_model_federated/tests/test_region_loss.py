@@ -177,6 +177,16 @@ def test_half_precision_logits_give_a_float32_loss_close_to_float32(dtype):
     assert abs(half.item() - ref.item()) < 1e-2
 
 
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_the_loss_is_computed_in_float32_not_in_the_logit_dtype(dtype):
+    """Large logits make float16/bfloat16 arithmetic visibly lossy. A loss that really runs in float32
+    gives the same value as the float32 loss of the very same (already rounded) numbers."""
+    torch.manual_seed(0)
+    half = (torch.randn(1, 5, 16, 16, 16) * 20).to(dtype)
+    y = _volume()
+    assert RegionDiceBCELoss()(half, y).item() == pytest.approx(RegionDiceBCELoss()(half.float(), y).item(), abs=1e-6)
+
+
 def test_loss_runs_inside_cpu_autocast():
     torch.manual_seed(0)
     with torch.autocast("cpu", dtype=torch.bfloat16):
