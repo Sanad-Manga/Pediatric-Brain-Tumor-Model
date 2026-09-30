@@ -17,18 +17,34 @@ from pathlib import Path
 import numpy as np
 import nibabel as nib
 
-sys.path.insert(0, r"C:\Users\ahmed\Pediatric-Brain-Tumor-Model-rstar\06_rstar_inference")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "06_rstar_inference"))
 from rstar import RStarSegmenter, RStarConfig  # noqa: E402
 from rstar import fusion  # noqa: E402
 from rstar.contract import ContractError  # noqa: E402
 
 DATA_ROOT = Path(r"D:\NeuroPeds AI\PKG - BraTS-PEDs-v1\BraTS-PEDs-v1\Training")
-MODELS_ROOT = Path(r"C:\Users\ahmed\Pediatric-Brain-Tumor-Model")
-OUT_DIR = Path(r"C:\Users\ahmed\AppData\Local\Temp\claude\C--Users-ahmed\1099fabd-13c1-4247-845e-223d5116695f\scratchpad\report_v2\comparison_package")
+MODELS_ROOT = REPO_ROOT
+OUT_DIR = Path(__file__).resolve().parent / "comparison_cache"
 
 PATIENTS = [
+    # Original 7 demo-cache patients (3 of these are known to fail the skull-strip check and
+    # will be skipped and logged, not crash the run -- see skipped.json from the first pass).
     "BraTS-PED-00021-000", "BraTS-PED-00028-000", "BraTS-PED-00030-000",
     "BraTS-PED-00051-000", "BraTS-PED-00093-000", "BraTS-PED-00099-000", "BraTS-PED-00230-000",
+    # Day 2: curated additions, picked from docs/per_patient_scores.csv (shipped 2D ensemble
+    # numbers) to tell the real story, not just the flattering one. All confirmed to pass the
+    # skull-strip contract check.
+    "BraTS-PED-00188-000",  # near-total failure: WT/NC/ET all ~0.00-0.001 (the one HANDOFF.md itself names)
+    "BraTS-PED-00191-000",  # ET almost entirely missed (0.012) despite excellent WT/NC (0.963)
+    "BraTS-PED-00108-000",  # same pattern, smaller ET volume (1765 voxels), ET 0.069 vs WT/NC 0.926
+    "BraTS-PED-00092-000",  # large tumor (68,895 WT voxels), ET essentially missed (0.005)
+    "BraTS-PED-00156-000",  # large tumor (229,209 WT voxels, the biggest here) AND poorly segmented (WT 0.288)
+    "BraTS-PED-00004-000",  # moderate struggle across all three regions, not a total collapse
+    "BraTS-PED-00190-000",  # clean win: ET 0.915, NC 0.980, WT 0.980
+    "BraTS-PED-00257-000",  # strong ET performance (0.911) on a real, sizeable ET volume (13,611 voxels)
+    "BraTS-PED-00212-000",  # empty ET, correctly predicted empty, very high WT/NC (0.973)
+    "BraTS-PED-00009-000",  # balanced good performer, large tumor (109,723 WT voxels)
 ]
 REGIONS = {"ET": (1,), "NC": (1, 2, 3), "WT": (1, 2, 3, 4)}
 

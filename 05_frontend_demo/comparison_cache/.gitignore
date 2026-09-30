@@ -1,0 +1,2 @@
+# Un-ignore the precomputed label volumes -- small (~50 KB each) and intentional; the page can't render without them.
+!*.npz

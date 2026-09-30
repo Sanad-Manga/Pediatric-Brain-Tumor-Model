@@ -3,13 +3,13 @@
   "rstar_mode": "R*",
   "rstar_status": "ok",
   "rstar_warnings": [],
-  "rstar_agreement": 0.8479911952377417,
+  "rstar_agreement": 0.8479589876159368,
   "regions": {
     "2d": {
       "ET": {
         "dice": 0.6246,
-        "precision": 0.8595,
-        "recall": 0.4905
+        "precision": 0.8594,
+        "recall": 0.4906
       },
       "NC": {
         "dice": 0.7182,
@@ -17,33 +17,33 @@
         "recall": 0.5806
       },
       "WT": {
-        "dice": 0.8024,
+        "dice": 0.8025,
         "precision": 0.9505,
         "recall": 0.6943
       }
     },
     "3d": {
       "ET": {
-        "dice": 0.4701,
-        "precision": 0.747,
+        "dice": 0.4702,
+        "precision": 0.7471,
         "recall": 0.343
       },
       "NC": {
-        "dice": 0.6039,
+        "dice": 0.6038,
         "precision": 0.9909,
-        "recall": 0.4343
+        "recall": 0.4342
       },
       "WT": {
-        "dice": 0.8103,
+        "dice": 0.8104,
         "precision": 0.991,
-        "recall": 0.6853
+        "recall": 0.6855
       }
     },
     "rstar": {
       "ET": {
-        "dice": 0.5954,
-        "precision": 0.8373,
-        "recall": 0.462
+        "dice": 0.5955,
+        "precision": 0.8374,
+        "recall": 0.4621
       },
       "NC": {
         "dice": 0.7225,
@@ -53,7 +53,7 @@
       "WT": {
         "dice": 0.8572,
         "precision": 0.9589,
-        "recall": 0.775
+        "recall": 0.7751
       }
     }
   }

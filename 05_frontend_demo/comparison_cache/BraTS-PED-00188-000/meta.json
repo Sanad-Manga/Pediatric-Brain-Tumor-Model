@@ -1,0 +1,65 @@
+{
+  "patient_id": "BraTS-PED-00188-000",
+  "rstar_mode": "R*",
+  "rstar_status": "review",
+  "rstar_warnings": [
+    "sequence t1c has negative intensities in 2.0% of its voxels; they are treated as background",
+    "sequence t1n has negative intensities in 1.9% of its voxels; they are treated as background",
+    "sequence t1n has only 25% exactly-zero voxels; check that the scan is skull-stripped",
+    "the 2D and 3D outlines barely overlap (agreement 0.00): possible 2D collapse or a frame/orientation error; verify the outline before using it"
+  ],
+  "rstar_agreement": 0.0,
+  "regions": {
+    "2d": {
+      "ET": {
+        "dice": 0.0,
+        "precision": null,
+        "recall": 0.0
+      },
+      "NC": {
+        "dice": 0.0,
+        "precision": 0.0,
+        "recall": 0.0
+      },
+      "WT": {
+        "dice": 0.0,
+        "precision": 0.0,
+        "recall": 0.0
+      }
+    },
+    "3d": {
+      "ET": {
+        "dice": 0.1152,
+        "precision": 0.9964,
+        "recall": 0.0611
+      },
+      "NC": {
+        "dice": 0.6198,
+        "precision": 0.9496,
+        "recall": 0.4601
+      },
+      "WT": {
+        "dice": 0.6198,
+        "precision": 0.9496,
+        "recall": 0.4601
+      }
+    },
+    "rstar": {
+      "ET": {
+        "dice": 0.0,
+        "precision": null,
+        "recall": 0.0
+      },
+      "NC": {
+        "dice": 0.3853,
+        "precision": 0.9184,
+        "recall": 0.2438
+      },
+      "WT": {
+        "dice": 0.3853,
+        "precision": 0.9184,
+        "recall": 0.2438
+      }
+    }
+  }
+}

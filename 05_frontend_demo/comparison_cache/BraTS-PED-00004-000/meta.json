@@ -1,0 +1,62 @@
+{
+  "patient_id": "BraTS-PED-00004-000",
+  "rstar_mode": "R*",
+  "rstar_status": "review",
+  "rstar_warnings": [
+    "the 2D and 3D outlines disagree (agreement 0.28 < 0.70); a weak signal, but cases like this scored lower on average"
+  ],
+  "rstar_agreement": 0.27718425520154766,
+  "regions": {
+    "2d": {
+      "ET": {
+        "dice": 0.3597,
+        "precision": 0.6932,
+        "recall": 0.2428
+      },
+      "NC": {
+        "dice": 0.1858,
+        "precision": 0.8475,
+        "recall": 0.1044
+      },
+      "WT": {
+        "dice": 0.3846,
+        "precision": 0.973,
+        "recall": 0.2396
+      }
+    },
+    "3d": {
+      "ET": {
+        "dice": 0.2263,
+        "precision": 0.3256,
+        "recall": 0.1734
+      },
+      "NC": {
+        "dice": 0.3683,
+        "precision": 0.9917,
+        "recall": 0.2262
+      },
+      "WT": {
+        "dice": 0.714,
+        "precision": 0.9929,
+        "recall": 0.5574
+      }
+    },
+    "rstar": {
+      "ET": {
+        "dice": 0.3758,
+        "precision": 0.5124,
+        "recall": 0.2967
+      },
+      "NC": {
+        "dice": 0.3485,
+        "precision": 0.9684,
+        "recall": 0.2125
+      },
+      "WT": {
+        "dice": 0.7359,
+        "precision": 0.991,
+        "recall": 0.5852
+      }
+    }
+  }
+}

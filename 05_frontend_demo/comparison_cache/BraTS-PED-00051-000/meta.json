@@ -7,7 +7,7 @@
     "sequence t2f has only 22% exactly-zero voxels; check that the scan is skull-stripped",
     "sequence t2w has only 22% exactly-zero voxels; check that the scan is skull-stripped"
   ],
-  "rstar_agreement": 0.8149853254301663,
+  "rstar_agreement": 0.8148936782436048,
   "regions": {
     "2d": {
       "ET": {
@@ -28,8 +28,8 @@
     },
     "3d": {
       "ET": {
-        "dice": 0.3047,
-        "precision": 0.8815,
+        "dice": 0.3046,
+        "precision": 0.8808,
         "recall": 0.1842
       },
       "NC": {

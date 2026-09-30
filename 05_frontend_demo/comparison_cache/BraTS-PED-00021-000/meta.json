@@ -5,7 +5,7 @@
   "rstar_warnings": [
     "sequence t1c has only 19% exactly-zero voxels; check that the scan is skull-stripped"
   ],
-  "rstar_agreement": 0.9015639570511284,
+  "rstar_agreement": 0.9015860159907072,
   "regions": {
     "2d": {
       "ET": {
@@ -16,7 +16,7 @@
       "NC": {
         "dice": 0.8628,
         "precision": 0.8279,
-        "recall": 0.9006
+        "recall": 0.9007
       },
       "WT": {
         "dice": 0.9458,
@@ -26,12 +26,12 @@
     },
     "3d": {
       "ET": {
-        "dice": 0.7709,
+        "dice": 0.771,
         "precision": 0.833,
-        "recall": 0.7175
+        "recall": 0.7176
       },
       "NC": {
-        "dice": 0.7217,
+        "dice": 0.7218,
         "precision": 0.7136,
         "recall": 0.7301
       },
@@ -45,7 +45,7 @@
       "ET": {
         "dice": 0.9149,
         "precision": 0.9057,
-        "recall": 0.9243
+        "recall": 0.9242
       },
       "NC": {
         "dice": 0.8199,

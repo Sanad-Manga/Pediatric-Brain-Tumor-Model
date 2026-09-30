@@ -1,0 +1,60 @@
+{
+  "patient_id": "BraTS-PED-00190-000",
+  "rstar_mode": "R*",
+  "rstar_status": "ok",
+  "rstar_warnings": [],
+  "rstar_agreement": 0.9477997102499095,
+  "regions": {
+    "2d": {
+      "ET": {
+        "dice": 0.9149,
+        "precision": 0.8824,
+        "recall": 0.9498
+      },
+      "NC": {
+        "dice": 0.9798,
+        "precision": 0.9747,
+        "recall": 0.9848
+      },
+      "WT": {
+        "dice": 0.9798,
+        "precision": 0.9747,
+        "recall": 0.9848
+      }
+    },
+    "3d": {
+      "ET": {
+        "dice": 0.7816,
+        "precision": 0.7445,
+        "recall": 0.8226
+      },
+      "NC": {
+        "dice": 0.942,
+        "precision": 0.9384,
+        "recall": 0.9455
+      },
+      "WT": {
+        "dice": 0.942,
+        "precision": 0.9384,
+        "recall": 0.9455
+      }
+    },
+    "rstar": {
+      "ET": {
+        "dice": 0.8773,
+        "precision": 0.8551,
+        "recall": 0.9007
+      },
+      "NC": {
+        "dice": 0.9607,
+        "precision": 0.9309,
+        "recall": 0.9925
+      },
+      "WT": {
+        "dice": 0.9607,
+        "precision": 0.9309,
+        "recall": 0.9925
+      }
+    }
+  }
+}
