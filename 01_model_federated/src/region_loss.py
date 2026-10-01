@@ -58,11 +58,14 @@ class RegionDiceBCELoss(nn.Module):
     the logits, and everything runs in float32 whatever the logit dtype, so it is safe under AMP.
     """
 
-    def __init__(self, smooth: float = 1.0) -> None:
+    def __init__(self, smooth: float = 1.0, terms: str = "both") -> None:
         super().__init__()
         if isinstance(smooth, bool) or not isinstance(smooth, (int, float)) or not math.isfinite(smooth) or smooth <= 0:
             raise ValueError(f"smooth must be a positive finite number, got {smooth!r}")
+        if terms not in ("both", "dice", "bce"):  # Addendum 7: train one half alone, as a diagnostic
+            raise ValueError(f"terms must be 'both', 'dice' or 'bce', got {terms!r}")
         self.smooth = float(smooth)
+        self.terms = terms
 
     def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         lg = logits.float()
@@ -86,6 +89,10 @@ class RegionDiceBCELoss(nn.Module):
         dims = (0,) + tuple(range(2, lg.ndim))  # everything except the region channel
         dice = 1.0 - (2.0 * (prob * target).sum(dims) + self.smooth) / (prob.sum(dims) + target.sum(dims) + self.smooth)
         bce = -(target * log_p + (1.0 - target) * log_q).mean(dims)
+        if self.terms == "dice":
+            return dice.mean()
+        if self.terms == "bce":
+            return bce.mean()
         return (dice + bce).mean()
 
 

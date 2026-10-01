@@ -29,7 +29,7 @@ def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
         scheduler.step()
 
 
-def _build_loss(loss_kind: str):
+def _build_loss(loss_kind: str, region_terms: str = "both"):
     """dice_ce (original): plain CrossEntropy has no notion of a rare class --
     ET is the smallest region by voxel count of the 4, and a real overnight run
     on real data (2026-09-22) showed ET-specific held-out Dice declining while
@@ -45,13 +45,17 @@ def _build_loss(loss_kind: str):
 
     region_hybrid (Addendum 6): region_dice_bce + dice_ce with equal weights, so ET keeps direct
     per-class pressure (region_dice_bce alone under-segmented ET in its first real run).
+
+    region_terms (Addendum 7, diagnostic): "dice" or "bce" trains only that half of region_dice_bce.
     """
+    if region_terms != "both" and loss_kind != "region_dice_bce":
+        raise ValueError(f"region_terms={region_terms!r} only applies to loss_kind='region_dice_bce', got {loss_kind!r}")
     if loss_kind == "dice_ce":
         return DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)
     if loss_kind == "dice_focal":
         return DiceFocalLoss(to_onehot_y=True, softmax=True, include_background=True, gamma=2.0)
     if loss_kind == "region_dice_bce":
-        return RegionDiceBCELoss()
+        return RegionDiceBCELoss(terms=region_terms)
     if loss_kind == "region_hybrid":
         return RegionHybridLoss()
     raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal', 'region_dice_bce' or 'region_hybrid', got {loss_kind!r}")
@@ -78,6 +82,7 @@ def train_single_client(
     deadline_unix: float | None = None,
     lr_horizon: int | None = None,
     loss_kind: str = "dice_ce",
+    region_terms: str = "both",
 ) -> tuple[FederatedUNet3D, list[float]]:
     """Trains `model` (or a fresh one) on the given manifest for num_epochs.
 
@@ -114,7 +119,7 @@ def train_single_client(
 
     model = (model or build_model()).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-    loss_fn = _build_loss(loss_kind)
+    loss_fn = _build_loss(loss_kind, region_terms)
 
     dataset = build_dataset(
         manifest_path, data_mode=config.data_mode, cache_path=config.cache_path,
@@ -201,7 +206,8 @@ def train_single_client(
             model.state_dict(),
             optimizer.state_dict(),
             extra={"avg_loss": avg_loss, "n_skipped_nonfinite": n_skipped, "lr": current_lr,
-                  "loss_kind": loss_kind},
+                  "loss_kind": loss_kind,
+                  **({"region_terms": region_terms} if loss_kind == "region_dice_bce" else {})},
         )
         prune_old_checkpoints(config.checkpoint_dir, config.run_id)
 
