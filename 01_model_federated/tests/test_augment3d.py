@@ -275,7 +275,7 @@ def _dropout_transforms(aug):
 
 
 def test_cli_default_is_zero_and_no_dropout_without_the_flag(monkeypatch):  # Req 33
-    assert run.build_arg_parser().parse_args([]).modality_dropout == 0.0
+    assert run.parse_args([]).modality_dropout == 0.0
     calls = _run_main(monkeypatch, ["--use-augmentation"])
     assert _dropout_transforms(calls["single"]["augmentation_transform"]) == []
 
