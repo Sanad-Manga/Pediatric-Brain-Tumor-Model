@@ -250,7 +250,7 @@ def _run_main(monkeypatch, argv):
 
 
 def test_cli_default_loss_is_unchanged():
-    assert run.parse_args([]).loss == "dice_ce"
+    assert run.build_arg_parser().parse_args([]).loss == "dice_ce"
 
 
 @pytest.mark.parametrize("kind", ["dice_ce", "dice_focal", "region_dice_bce"])

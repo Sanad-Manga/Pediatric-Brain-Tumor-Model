@@ -204,6 +204,8 @@ def train_single_client(
             optimizer.state_dict(),
             extra={"avg_loss": avg_loss, "n_skipped_nonfinite": n_skipped, "lr": current_lr,
                   "loss_kind": loss_kind},
+            model_width=config.model_width,
+            model_depth=config.model_depth,
         )
         prune_old_checkpoints(config.checkpoint_dir, config.run_id)
 

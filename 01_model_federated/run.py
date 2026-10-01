@@ -21,6 +21,14 @@ OLD_DEFAULTS = {
 }
 
 
+class _StoreExplicit(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        explicit = set(getattr(namespace, "_explicit_cli", None) or ())
+        explicit.add(self.dest)
+        namespace._explicit_cli = explicit
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Federated 3D U-Net training (BraTS-PEDs)")
     p.add_argument("--config", default=None, help="path to YAML configuration")
@@ -38,7 +46,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ], help="Manifests to use for a federated run")
     p.add_argument("--epochs", type=int, default=1, help="Epochs (single-client) or local epochs per round (federated)")
     p.add_argument("--rounds", type=int, default=2, help="Federated rounds (ignored for single-client)")
-    p.add_argument("--lr", type=float, default=None)
+    p.add_argument("--lr", type=float, default=1e-3, action=_StoreExplicit)
     p.add_argument("--coral-weight", type=float, default=1.0)
     p.add_argument("--coral-queue-size", type=int, default=8)
     p.add_argument("--coral-steps-per-round", type=int, default=None)
@@ -46,10 +54,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--resume", action="store_true")
     p.add_argument("--deadline-unix", type=float, default=None,
                     help="unix timestamp; single-client loop stops between epochs once past it")
-    p.add_argument("--lr-horizon", type=int, default=None,
+    p.add_argument("--lr-horizon", type=int, default=None, action=_StoreExplicit,
                     help="single-client only: cosine-anneal lr to 1e-5 over this many epochs "
                          "(fixed regardless of --epochs); default: no schedule")
-    p.add_argument("--loss", choices=["dice_ce", "dice_focal", "region_dice_bce"], default=None,
+    p.add_argument("--loss", choices=["dice_ce", "dice_focal", "region_dice_bce"],
+                   default="dice_ce", action=_StoreExplicit,
                     help="single-client only: dice_focal down-weights easy/majority voxels, "
                          "a standard fix for the rare-class (ET) under-segmentation dice_ce shows; "
                          "region_dice_bce trains the three scored regions (WT/TC/ET) directly with "
@@ -61,13 +70,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--patch-fractions", type=float, nargs=3, default=[0.35, 0.45, 0.20],
                     metavar=("ET", "TUMOR", "RANDOM"),
                     help="--data-mode patch only: share of ET-centred / tumour-centred / random patches (sum 1)")
-    p.add_argument("--modality-dropout", type=float, default=None,
+    p.add_argument("--modality-dropout", type=float, default=0.0, action=_StoreExplicit,
                     help="per-sequence probability of zeroing a whole input channel during augmentation, "
                          "in [0.0, 1.0); requires --use-augmentation")
-    p.add_argument("--sequence-shift", type=float, default=None,
+    p.add_argument("--sequence-shift", type=float, default=0.0, action=_StoreExplicit,
                     help="probability per sample of translating a random subset of input sequences relative to the "
                          "labels' frame (simulated misregistration), in [0.0, 1.0); requires --use-augmentation")
-    p.add_argument("--sequence-shift-max-voxels", type=float, default=None,
+    p.add_argument("--sequence-shift-max-voxels", type=float, default=1.2, action=_StoreExplicit,
                     help="maximum translation per axis, in voxels of the grid being trained on (1.2 voxels is about "
                          "3 mm in-plane on the 96^3 grid, about 1.2 mm in --data-mode patch); must be > 0")
     return p
@@ -76,6 +85,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def resolve_settings(args: argparse.Namespace, cfg: dict | None) -> dict:
     """Resolve CLI values over config values over the legacy built-in defaults."""
     config = cfg or {}
+    explicit = getattr(args, "_explicit_cli", None) or set()
     resolved = {}
     for name, default in OLD_DEFAULTS.items():
         config_value = None
@@ -91,7 +101,8 @@ def resolve_settings(args: argparse.Namespace, cfg: dict | None) -> dict:
         elif name == "lr":
             config_value = (config.get("schedule") or {}).get("lr")
         cli_value = getattr(args, name)
-        resolved[name] = cli_value if cli_value is not None else (
+        resolved[name] = (
+            cli_value if name in explicit else
             config_value if config_value is not None else default
         )
 

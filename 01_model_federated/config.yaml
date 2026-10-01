@@ -10,7 +10,7 @@ loss:
   class_weights: null       # null = uniform; otherwise [background, ET, NETC, CC, ED]
 
 schedule:
-  kind: cosine              # cosine | none
+  kind: none                # cosine | none
   min_lr: 1.0e-5
 
 # ---------------------------------------------------------------- 3D augmentation

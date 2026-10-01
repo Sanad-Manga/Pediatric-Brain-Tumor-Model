@@ -88,5 +88,29 @@ def test_config_file_has_expected_defaults():
     cfg = load_config(run.__file__.replace("run.py", "config.yaml"))
     assert cfg["model"] == {"width": 16, "depth": 5}
     assert cfg["loss"]["class_weights"] is None
-    assert cfg["schedule"]["kind"] == "cosine"
+    assert cfg["schedule"]["kind"] == "none"
     assert "seed" not in cfg["augmentation"]
+
+
+def test_parser_exposes_legacy_defaults_and_tracks_explicit_default_flag():
+    parser = run.build_arg_parser()
+    defaults = parser.parse_args([])
+    assert defaults.loss == "dice_ce"
+    assert defaults.lr == 1e-3
+    assert defaults.modality_dropout == 0.0
+    assert defaults.sequence_shift == 0.0
+    assert defaults.sequence_shift_max_voxels == 1.2
+
+    explicit = parser.parse_args(["--loss", "dice_ce"])
+    assert "loss" in explicit._explicit_cli
+
+
+def test_checkpoint_stores_non_default_model_dimensions(tmp_path):
+    from src.checkpoint import load_checkpoint, save_checkpoint
+
+    save_checkpoint(
+        str(tmp_path), "wide", epoch=0, model_state={}, optimizer_state={},
+        model_width=64, model_depth=5,
+    )
+    checkpoint = load_checkpoint(str(tmp_path), "wide")
+    assert checkpoint["model_config"] == {"width": 64, "depth": 5}
