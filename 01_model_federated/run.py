@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import argparse
 import math
+import random
 import time
+
+import numpy as np
+import torch
 
 from src.augment3d import Augment3D
 from src.config import TrainConfig
@@ -11,6 +15,14 @@ from src.federated import train_federated
 from src.train_single import train_single_client
 
 DEFAULT_MANIFEST_DIR = "../00_shared/manifests"
+
+
+def seed_everything(seed: int) -> None:
+    """Seed every RNG a run draws from, so the same command twice gives the same model."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # harmless if no CUDA device
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -61,6 +73,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--sequence-shift-max-voxels", type=float, default=1.2,
                     help="maximum translation per axis, in voxels of the grid being trained on (1.2 voxels is about "
                          "3 mm in-plane on the 96^3 grid, about 1.2 mm in --data-mode patch); must be > 0")
+    p.add_argument("--seed", type=int, default=None,
+                    help="seed random / numpy / torch for a reproducible run; default: no seeding "
+                         "(unchanged behaviour)")
+    p.add_argument("--eval-every", type=int, default=0, metavar="N",
+                    help="single-client only: every N epochs, score the checkpoint on --eval-manifest "
+                         "(tools/eval_heldout_3d.py logic) and copy the one with the best worst-region "
+                         "Dice to <checkpoint-dir>/<run-id>/best.pt; 0 = never (default, unchanged behaviour)")
+    p.add_argument("--eval-manifest", default=f"{DEFAULT_MANIFEST_DIR}/heldout.json",
+                    help="--eval-every only: held-out manifest to score; read from --cache-path in "
+                         "--data-mode real, synthetic volumes in --data-mode dummy")
     return p
 
 
@@ -78,6 +100,14 @@ def parse_args(argv=None) -> argparse.Namespace:
                      "(the federated loop never reads --loss and would silently ignore it)")
     if args.data_mode == "patch" and args.use_federation:
         parser.error("--data-mode patch is single-client only; it cannot be combined with --use-federation")
+    if args.eval_every < 0:
+        parser.error(f"--eval-every must be >= 0 (0 = never), got {args.eval_every}")
+    if args.eval_every > 0 and args.use_federation:
+        parser.error("--eval-every is single-client only; it cannot be combined with --use-federation "
+                     "(the federated loop never reads it and would silently ignore it)")
+    if args.eval_every > 0 and args.data_mode == "patch":
+        parser.error("--eval-every does not support --data-mode patch (the held-out scorer reads the "
+                     "96-cube cache; use tools/eval_patch3d.py for patch checkpoints)")
     if args.modality_dropout > 0.0 and not args.use_augmentation:
         parser.error("--modality-dropout requires --use-augmentation "
                      "(it is applied by the augmentation transform and would silently do nothing)")
@@ -89,6 +119,8 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.seed is not None:
+        seed_everything(args.seed)
 
     config = TrainConfig(
         use_augmentation=args.use_augmentation,
@@ -129,6 +161,10 @@ def main() -> None:
         )
         print(f"Federated training complete. Round losses: {round_losses}")
     else:
+        heldout_scorer = None
+        if args.eval_every > 0:
+            from src.heldout_eval import build_heldout_scorer
+            heldout_scorer = build_heldout_scorer(args.data_mode, args.cache_path, args.eval_manifest)
         _model, losses = train_single_client(
             config=config,
             manifest_path=args.manifest,
@@ -138,6 +174,8 @@ def main() -> None:
             deadline_unix=args.deadline_unix,
             lr_horizon=args.lr_horizon,
             loss_kind=args.loss,
+            eval_every=args.eval_every,
+            heldout_scorer=heldout_scorer,
         )
         stopped_early = args.deadline_unix is not None and time.time() >= args.deadline_unix
         print(f"Single-client training complete ({len(losses)} epoch(s) this call"
