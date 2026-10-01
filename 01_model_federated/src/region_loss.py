@@ -15,6 +15,7 @@ import math
 
 import torch
 import torch.nn as nn
+from monai.losses import DiceCELoss
 
 NUM_CLASSES = 5
 REGION_NAMES = ("WT", "TC", "ET")  # channel order of every (B, 3, ...) tensor in this module
@@ -86,3 +87,22 @@ class RegionDiceBCELoss(nn.Module):
         dice = 1.0 - (2.0 * (prob * target).sum(dims) + self.smooth) / (prob.sum(dims) + target.sum(dims) + self.smooth)
         bce = -(target * log_p + (1.0 - target) * log_q).mean(dims)
         return (dice + bce).mean()
+
+
+class RegionHybridLoss(nn.Module):
+    """Region loss + the existing per-label Dice-CE, equal weights (SPEC.md Addendum 6).
+
+    The first real run of RegionDiceBCELoss alone (2026-10-01) cut false ET but under-segmented real
+    enhancing tumour (about two-thirds of the true volume). The per-label term keeps direct per-class
+    pressure on label 1 and supervises the label 2 vs label 3 split the region term cannot see.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.region = RegionDiceBCELoss()
+        self.per_label = DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)  # = _build_loss("dice_ce")
+
+    def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        region_term = self.region(logits, y)                    # validates the label values first
+        y5 = y if (y.ndim == 5 and y.shape[1] == 1) else y.unsqueeze(1)
+        return region_term + self.per_label(logits.float(), y5).float()

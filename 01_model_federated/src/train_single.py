@@ -13,7 +13,7 @@ from .checkpoint import load_checkpoint, prune_old_checkpoints, save_checkpoint
 from .config import TrainConfig
 from .data import build_dataset
 from .model import FederatedUNet3D, build_model
-from .region_loss import RegionDiceBCELoss
+from .region_loss import RegionDiceBCELoss, RegionHybridLoss
 
 
 def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
@@ -42,6 +42,9 @@ def _build_loss(loss_kind: str):
 
     region_dice_bce (SPEC.md Addendum 5): Dice + BCE on the three scored regions (WT/TC/ET), read
     off the same 5-way softmax by summing probabilities -- see region_loss.py.
+
+    region_hybrid (Addendum 6): region_dice_bce + dice_ce with equal weights, so ET keeps direct
+    per-class pressure (region_dice_bce alone under-segmented ET in its first real run).
     """
     if loss_kind == "dice_ce":
         return DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)
@@ -49,7 +52,9 @@ def _build_loss(loss_kind: str):
         return DiceFocalLoss(to_onehot_y=True, softmax=True, include_background=True, gamma=2.0)
     if loss_kind == "region_dice_bce":
         return RegionDiceBCELoss()
-    raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal' or 'region_dice_bce', got {loss_kind!r}")
+    if loss_kind == "region_hybrid":
+        return RegionHybridLoss()
+    raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal', 'region_dice_bce' or 'region_hybrid', got {loss_kind!r}")
 
 
 def _apply_augmentation(
