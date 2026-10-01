@@ -136,6 +136,26 @@ def test_training_with_one_half_records_it_in_the_checkpoint(tmp_path, small_man
     build_model().load_state_dict(payload["model_state"], strict=True)
 
 
+@pytest.mark.parametrize("terms", ["dice", "bce"])
+def test_the_training_loop_really_uses_the_requested_half(tmp_path, small_manifest, monkeypatch, terms):
+    """Guards against a run that RECORDS one half but TRAINS another: the loss object the loop
+    builds must be the requested half."""
+    import src.train_single as ts
+    built = []
+    real_build = ts._build_loss
+
+    def spy(*args, **kwargs):
+        loss = real_build(*args, **kwargs)
+        built.append(loss)
+        return loss
+
+    monkeypatch.setattr(ts, "_build_loss", spy)
+    config = TrainConfig(run_id=f"spy_{terms}", checkpoint_dir=str(tmp_path / "ckpt"))
+    train_single_client(config, small_manifest("hospA", 1), num_epochs=1,
+                        loss_kind="region_dice_bce", region_terms=terms)
+    assert len(built) == 1 and isinstance(built[0], RegionDiceBCELoss) and built[0].terms == terms
+
+
 def test_default_path_checkpoints_get_no_new_key(tmp_path, small_manifest):
     config = TrainConfig(run_id="t_ce", checkpoint_dir=str(tmp_path / "ckpt"))
     train_single_client(config, small_manifest("hospA", 2), num_epochs=1)   # old-style call, no new argument
@@ -188,7 +208,7 @@ def test_cli_rejects_bad_or_pointless_region_terms(monkeypatch, capsys, argv, mu
 
 def test_cli_help_names_the_three_values():
     action = next(a for a in run.build_arg_parser()._actions if a.dest == "region_terms")
-    assert all(v in action.help for v in ("both", "dice", "bce"))
+    assert all(f"{v} = " in action.help for v in ("both", "dice", "bce"))
 
 
 # ------------------------------------------------------------------------------------------ Req 81
