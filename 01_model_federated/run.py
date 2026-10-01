@@ -49,6 +49,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--region-terms", choices=["both", "dice", "bce"], default="both",
                     help="--loss region_dice_bce only (diagnostic): both = the full region loss, dice = only its "
                          "soft Dice half, bce = only its binary cross-entropy half")
+    p.add_argument("--et-pos-weight", type=float, default=1.0,
+                    help="--loss region_dice_bce only: weight on positive enhancing-tumour voxels in the BCE term "
+                         "(counteracts ET being ~1 in 1,279 voxels); 1.0 = unweighted")
     p.add_argument("--patch-size", type=int, nargs=3, default=[128, 128, 128], metavar=("D", "H", "W"),
                     help="--data-mode patch only: crop size in voxels, each a multiple of 16")
     p.add_argument("--patches-per-epoch", type=int, default=580,
@@ -80,6 +83,11 @@ def parse_args(argv=None) -> argparse.Namespace:
     if args.loss in ("region_dice_bce", "region_hybrid") and args.use_federation:
         parser.error(f"--loss {args.loss} cannot be combined with --use-federation "
                      "(the federated loop never reads --loss and would silently ignore it)")
+    if not (args.et_pos_weight > 0.0 and math.isfinite(args.et_pos_weight)):  # also rejects NaN
+        parser.error(f"--et-pos-weight must be a positive finite number, got {args.et_pos_weight}")
+    if args.et_pos_weight != 1.0 and (args.loss != "region_dice_bce" or args.region_terms == "dice"):
+        parser.error(f"--et-pos-weight {args.et_pos_weight} requires --loss region_dice_bce with a BCE term "
+                     f"(got --loss {args.loss}, --region-terms {args.region_terms}); it would silently do nothing")
     if args.region_terms != "both" and args.loss != "region_dice_bce":
         parser.error(f"--region-terms {args.region_terms} requires --loss region_dice_bce (got --loss {args.loss}); "
                      "it would silently do nothing")
@@ -146,6 +154,7 @@ def main() -> None:
             lr_horizon=args.lr_horizon,
             loss_kind=args.loss,
             region_terms=args.region_terms,
+            et_pos_weight=args.et_pos_weight,
         )
         stopped_early = args.deadline_unix is not None and time.time() >= args.deadline_unix
         print(f"Single-client training complete ({len(losses)} epoch(s) this call"

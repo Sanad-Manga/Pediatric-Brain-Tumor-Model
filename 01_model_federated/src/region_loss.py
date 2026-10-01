@@ -58,14 +58,18 @@ class RegionDiceBCELoss(nn.Module):
     the logits, and everything runs in float32 whatever the logit dtype, so it is safe under AMP.
     """
 
-    def __init__(self, smooth: float = 1.0, terms: str = "both") -> None:
+    def __init__(self, smooth: float = 1.0, terms: str = "both", et_pos_weight: float = 1.0) -> None:
         super().__init__()
         if isinstance(smooth, bool) or not isinstance(smooth, (int, float)) or not math.isfinite(smooth) or smooth <= 0:
             raise ValueError(f"smooth must be a positive finite number, got {smooth!r}")
         if terms not in ("both", "dice", "bce"):  # Addendum 7: train one half alone, as a diagnostic
             raise ValueError(f"terms must be 'both', 'dice' or 'bce', got {terms!r}")
+        if (isinstance(et_pos_weight, bool) or not isinstance(et_pos_weight, (int, float))
+                or not math.isfinite(et_pos_weight) or et_pos_weight <= 0):
+            raise ValueError(f"et_pos_weight must be a positive finite number, got {et_pos_weight!r}")
         self.smooth = float(smooth)
         self.terms = terms
+        self.et_pos_weight = float(et_pos_weight)  # Addendum 8: weight on POSITIVE voxels of the ET BCE term only
 
     def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         lg = logits.float()
@@ -88,7 +92,10 @@ class RegionDiceBCELoss(nn.Module):
 
         dims = (0,) + tuple(range(2, lg.ndim))  # everything except the region channel
         dice = 1.0 - (2.0 * (prob * target).sum(dims) + self.smooth) / (prob.sum(dims) + target.sum(dims) + self.smooth)
-        bce = -(target * log_p + (1.0 - target) * log_q).mean(dims)
+        pos_weight = torch.ones(3, dtype=lg.dtype, device=lg.device)
+        pos_weight[2] = self.et_pos_weight                    # channel order (WT, TC, ET)
+        pos_weight = pos_weight.view(1, 3, *([1] * (lg.ndim - 2)))
+        bce = -(pos_weight * target * log_p + (1.0 - target) * log_q).mean(dims)
         if self.terms == "dice":
             return dice.mean()
         if self.terms == "bce":
