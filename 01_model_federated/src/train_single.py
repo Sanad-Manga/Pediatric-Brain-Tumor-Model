@@ -9,7 +9,8 @@ import torch
 from torch.utils.data import DataLoader
 from monai.losses import DiceCELoss, DiceFocalLoss
 
-from .checkpoint import load_checkpoint, prune_old_checkpoints, save_checkpoint
+from .best_checkpoint import BestCheckpointTracker, evaluate_and_track
+from .checkpoint import checkpoint_dir_for, load_checkpoint, prune_old_checkpoints, save_checkpoint
 from .config import TrainConfig
 from .data import build_dataset
 from .model import FederatedUNet3D, build_model
@@ -88,8 +89,8 @@ def train_single_client(
     deadline_unix: float | None = None,
     lr_horizon: int | None = None,
     loss_kind: str = "dice_ce",
-    region_terms: str = "both",
-    et_pos_weight: float = 1.0,
+    eval_every: int = 0,
+    heldout_scorer: Callable | None = None,
 ) -> tuple[FederatedUNet3D, list[float]]:
     """Trains `model` (or a fresh one) on the given manifest for num_epochs.
 
@@ -113,6 +114,12 @@ def train_single_client(
     fixes; same cause, same fix, reapplied here since the failure mode
     doesn't care which section's training loop it's in. None = no schedule
     (flat lr the whole run, the original behaviour).
+
+    eval_every / heldout_scorer: if eval_every > 0, after every eval_every-th
+    completed epoch heldout_scorer(model) -> {region: dice} is called, and the
+    checkpoint with the best WORST-region score so far is copied to
+    <checkpoint_dir>/<run_id>/best.pt (see best_checkpoint.py). 0 = never, the
+    original behaviour: nothing in the loop changes.
 
     Non-finite batches (loss is nan/inf) are skipped rather than applied --
     the 2D pipeline hit exactly this on real data early on and losing the
@@ -166,6 +173,16 @@ def train_single_client(
 
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
+    best_tracker = None
+    run_dir = None
+    if eval_every > 0:
+        if heldout_scorer is None:
+            raise ValueError("eval_every > 0 requires a heldout_scorer")
+        run_dir = checkpoint_dir_for(config.checkpoint_dir, config.run_id)
+        # a resumed run keeps the best it had already found instead of starting over
+        best_tracker = (BestCheckpointTracker.load(run_dir / "best.json") if resume
+                        else BestCheckpointTracker())
+
     for epoch in range(start_epoch, start_epoch + num_epochs):
         model.train()
         epoch_loss = 0.0
@@ -209,7 +226,7 @@ def train_single_client(
         if scheduler is not None:
             _step_scheduler_clamped(scheduler, effective_lr_horizon or 1)
 
-        save_checkpoint(
+        ckpt_path = save_checkpoint(
             config.checkpoint_dir,
             config.run_id,
             epoch,
@@ -220,6 +237,8 @@ def train_single_client(
             model_width=config.model_width,
             model_depth=config.model_depth,
         )
+        if best_tracker is not None and (epoch + 1) % eval_every == 0:
+            evaluate_and_track(model, heldout_scorer, best_tracker, epoch, ckpt_path, run_dir)
         prune_old_checkpoints(config.checkpoint_dir, config.run_id)
 
         if deadline_unix is not None and time.time() >= deadline_unix:

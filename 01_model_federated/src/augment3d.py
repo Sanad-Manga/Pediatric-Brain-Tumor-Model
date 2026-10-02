@@ -305,6 +305,12 @@ class Augment3D:
     def __init__(self, **transform_kwargs):
         self._compose = build_transforms3d(**transform_kwargs)
 
+    def set_random_state(self, seed: int) -> "Augment3D":
+        """MONAI transforms keep their OWN numpy RandomState (seeded from OS entropy, not from np.random.seed),
+        so seeding random/numpy/torch alone leaves every augmentation draw unseeded. --seed calls this."""
+        self._compose.set_random_state(seed=seed)
+        return self
+
     def __call__(self, x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         out_x, out_y = [], []
         for i in range(x.shape[0]):

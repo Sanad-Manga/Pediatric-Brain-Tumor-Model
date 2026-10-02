@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -90,7 +91,9 @@ class BraTSPedsDataset(Dataset):
         return self._real_sample(subject_id)
 
     def _dummy_sample(self, subject_id: str) -> tuple[torch.Tensor, torch.Tensor]:
-        rng = np.random.default_rng(abs(hash((self.seed, subject_id))) % (2**32))
+        # zlib.crc32, not hash(): Python randomises str hashes per process, so hash() gave different dummy
+        # data in every run and made seeded runs unreproducible.
+        rng = np.random.default_rng(zlib.crc32(f"{self.seed}:{subject_id}".encode()))
         x = rng.standard_normal(
             (IN_CHANNELS, VOLUME_SIZE, VOLUME_SIZE, VOLUME_SIZE)
         ).astype(np.float32)

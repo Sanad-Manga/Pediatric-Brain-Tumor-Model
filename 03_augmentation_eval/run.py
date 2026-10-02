@@ -170,6 +170,19 @@ def cmd_tumor_type(args) -> int:
 def cmd_train(args) -> int:
     from src import train
 
+    extra = {}
+    if args.seed is not None:
+        import random
+
+        import numpy as np
+        import torch
+
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed_all(args.seed)  # harmless if no CUDA device
+        extra["seed"] = args.seed
+
     cfg = load_config(
         args.config,
         use_augmentation=args.use_augmentation,
@@ -191,6 +204,7 @@ def cmd_train(args) -> int:
         patience=args.patience,
         deadline_unix=args.deadline_unix,
         lr_horizon=args.lr_horizon,
+        **extra,
     )
     ckpt = Path(summary["checkpoint_dir"])
     print(f"\nbest mean_dice: {summary['best_mean_dice']}")
@@ -359,6 +373,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_train = sub.add_parser("train", help="train the segmentation model, save checkpoints")
     p_train.add_argument("--run-id", default="run1", help="checkpoints/<run_id>/")
+    p_train.add_argument("--seed", type=int, default=None,
+                         help="seed random / numpy / torch and pass it to train.run for a reproducible "
+                              "run; default: unchanged (train.run keeps its built-in seed of 1337)")
     p_train.add_argument("--epochs", type=int, default=5)
     p_train.add_argument("--batch-size", type=int, default=8)
     p_train.add_argument("--lr", type=float, default=1e-3)
