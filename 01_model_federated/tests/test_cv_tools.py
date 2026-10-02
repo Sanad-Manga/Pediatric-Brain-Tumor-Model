@@ -142,3 +142,40 @@ def test_dummy_cv_run_writes_summary_and_skips_on_rerun(tmp_path, capsys):
     assert run_cv(args) == 0
     second_output = capsys.readouterr().out
     assert second_output.count("completed checkpoint and score found; skipping") == 5
+
+
+# ---- follow-up to #46: a manifest patient with no cache file is excluded with a warning, not a crash ----
+def test_patients_missing_from_the_cache_are_excluded_and_reported(tmp_path):
+    import warnings
+    patients = [f"PAT-{index:02d}" for index in range(21)]
+    train_ids, heldout_ids = patients[:14], patients[14:]
+    present = [p for p in patients if p != "PAT-20"]                      # PAT-20 has no cache file
+    cache = _fake_seg_cache(tmp_path, present, [0 if i < 5 else i for i in range(20)])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        folds = make_folds(train_ids, heldout_ids, cache, seed=1)
+    assert any("PAT-20" in str(w.message) for w in caught)
+    seen = sorted(p for _train, val in folds for p in val)
+    assert seen == sorted(present)
+    assert all("PAT-20" not in train for train, _val in folds)
+
+
+def test_cli_writes_the_excluded_list(tmp_path, monkeypatch):
+    import tools.make_cv_folds as m
+    patients = [f"PAT-{index:02d}" for index in range(21)]
+    (tmp_path / "train.json").write_text(json.dumps(patients[:14]))
+    (tmp_path / "heldout.json").write_text(json.dumps(patients[14:]))
+    cache = _fake_seg_cache(tmp_path, patients[:20], [0 if i < 5 else i for i in range(20)])
+    monkeypatch.setattr(m, "DEFAULT_TRAIN_MANIFEST", tmp_path / "train.json")
+    monkeypatch.setattr(m, "DEFAULT_HELDOUT_MANIFEST", tmp_path / "heldout.json")
+    assert m.main(["--cache-path", str(cache), "--out-dir", str(tmp_path / "out")]) == 0
+    assert json.loads((tmp_path / "out" / "excluded.json").read_text()) == ["PAT-20"]
+
+
+def test_a_cache_file_without_seg_still_fails_loudly(tmp_path):
+    import pytest
+    patients = [f"PAT-{index:02d}" for index in range(20)]
+    cache = _fake_seg_cache(tmp_path, patients, [0 if i < 5 else i for i in range(20)])
+    np.savez_compressed(cache / "PAT-03.npz", image=np.zeros(3))         # corrupt: present but no 'seg'
+    with pytest.raises(ValueError, match="seg"):
+        make_folds(patients[:14], patients[14:], cache, seed=1)

@@ -6,6 +6,7 @@ import argparse
 import itertools
 import json
 import random
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,12 @@ def _read_ids(path: str | Path) -> list[str]:
     if len(ids) != len(set(ids)):
         raise ValueError(f"manifest contains duplicate patient IDs: {path}")
     return ids
+
+
+def missing_from_cache(patient_ids: list[str], cache_path: str | Path) -> list[str]:
+    """Manifest patients with no <id>.npz in the cache (e.g. held-out BraTS-PED-00008-000 was never cached)."""
+    cache = Path(cache_path)
+    return [patient_id for patient_id in patient_ids if not (cache / f"{patient_id}.npz").is_file()]
 
 
 def _et_counts(patient_ids: list[str], cache_path: str | Path) -> dict[str, int]:
@@ -103,6 +110,11 @@ def make_folds(
         raise ValueError(f"input manifests overlap: {sorted(overlap)[:5]}")
 
     all_ids = train_ids + heldout_ids
+    missing = missing_from_cache(all_ids, cache_path)
+    if missing:
+        # Training would fail on these (no file to load), so they cannot be in any fold.
+        warnings.warn(f"excluding {len(missing)} patient(s) with no cache file: {missing}", stacklevel=2)
+        all_ids = [patient_id for patient_id in all_ids if patient_id not in set(missing)]
     et_counts = _et_counts(all_ids, cache_path)
     strata_by_id = _stratify_et_sizes(et_counts)
     stratum_ids = {
@@ -157,6 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     folds = make_folds(train_ids, heldout_ids, args.cache_path, seed=args.seed)
     for train_path, val_path in write_folds(folds, args.out_dir):
         print(f"wrote {train_path} and {val_path}")
+    excluded = missing_from_cache(train_ids + heldout_ids, args.cache_path)
+    (Path(args.out_dir) / "excluded.json").write_text(json.dumps(excluded, indent=2) + chr(10), encoding="utf-8")
+    if excluded:
+        print(f"excluded (no cache file): {excluded}")
     return 0
 
 
