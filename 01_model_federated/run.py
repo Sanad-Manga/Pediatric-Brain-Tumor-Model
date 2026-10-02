@@ -149,6 +149,8 @@ def main() -> None:
                   sequence_shift_max_voxels=args.sequence_shift_max_voxels)
         if config.use_augmentation else None
     )
+    if augmentation_transform is not None and args.seed is not None:
+        augmentation_transform.set_random_state(args.seed)  # augmentation keeps its own RNG; seed it too
 
     if config.use_federation:
         _model, round_losses = train_federated(
