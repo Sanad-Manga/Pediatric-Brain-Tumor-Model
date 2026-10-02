@@ -40,11 +40,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--lr-horizon", type=int, default=None,
                     help="single-client only: cosine-anneal lr to 1e-5 over this many epochs "
                          "(fixed regardless of --epochs); default: no schedule")
-    p.add_argument("--loss", choices=["dice_ce", "dice_focal", "region_dice_bce"], default="dice_ce",
+    p.add_argument("--loss", choices=["dice_ce", "dice_focal", "region_dice_bce", "region_hybrid"], default="dice_ce",
                     help="single-client only: dice_focal down-weights easy/majority voxels, "
                          "a standard fix for the rare-class (ET) under-segmentation dice_ce shows; "
                          "region_dice_bce trains the three scored regions (WT/TC/ET) directly with "
-                         "Dice + BCE on sums of the same 5-way softmax")
+                         "Dice + BCE on sums of the same 5-way softmax; region_hybrid adds dice_ce to "
+                         "that with equal weight")
+    p.add_argument("--region-terms", choices=["both", "dice", "bce"], default="both",
+                    help="--loss region_dice_bce only (diagnostic): both = the full region loss, dice = only its "
+                         "soft Dice half, bce = only its binary cross-entropy half")
+    p.add_argument("--et-pos-weight", type=float, default=1.0,
+                    help="--loss region_dice_bce only: weight on positive enhancing-tumour voxels in the BCE term "
+                         "(counteracts ET being ~1 in 1,279 voxels); 1.0 = unweighted")
     p.add_argument("--patch-size", type=int, nargs=3, default=[128, 128, 128], metavar=("D", "H", "W"),
                     help="--data-mode patch only: crop size in voxels, each a multiple of 16")
     p.add_argument("--patches-per-epoch", type=int, default=580,
@@ -73,9 +80,17 @@ def parse_args(argv=None) -> argparse.Namespace:
         parser.error(f"--sequence-shift must be in [0.0, 1.0), got {args.sequence_shift}")
     if not (args.sequence_shift_max_voxels > 0.0 and math.isfinite(args.sequence_shift_max_voxels)):
         parser.error(f"--sequence-shift-max-voxels must be a positive finite number, got {args.sequence_shift_max_voxels}")
-    if args.loss == "region_dice_bce" and args.use_federation:
-        parser.error("--loss region_dice_bce cannot be combined with --use-federation "
+    if args.loss in ("region_dice_bce", "region_hybrid") and args.use_federation:
+        parser.error(f"--loss {args.loss} cannot be combined with --use-federation "
                      "(the federated loop never reads --loss and would silently ignore it)")
+    if not (args.et_pos_weight > 0.0 and math.isfinite(args.et_pos_weight)):  # also rejects NaN
+        parser.error(f"--et-pos-weight must be a positive finite number, got {args.et_pos_weight}")
+    if args.et_pos_weight != 1.0 and (args.loss != "region_dice_bce" or args.region_terms == "dice"):
+        parser.error(f"--et-pos-weight {args.et_pos_weight} requires --loss region_dice_bce with a BCE term "
+                     f"(got --loss {args.loss}, --region-terms {args.region_terms}); it would silently do nothing")
+    if args.region_terms != "both" and args.loss != "region_dice_bce":
+        parser.error(f"--region-terms {args.region_terms} requires --loss region_dice_bce (got --loss {args.loss}); "
+                     "it would silently do nothing")
     if args.data_mode == "patch" and args.use_federation:
         parser.error("--data-mode patch is single-client only; it cannot be combined with --use-federation")
     if args.modality_dropout > 0.0 and not args.use_augmentation:
@@ -138,6 +153,8 @@ def main() -> None:
             deadline_unix=args.deadline_unix,
             lr_horizon=args.lr_horizon,
             loss_kind=args.loss,
+            region_terms=args.region_terms,
+            et_pos_weight=args.et_pos_weight,
         )
         stopped_early = args.deadline_unix is not None and time.time() >= args.deadline_unix
         print(f"Single-client training complete ({len(losses)} epoch(s) this call"
