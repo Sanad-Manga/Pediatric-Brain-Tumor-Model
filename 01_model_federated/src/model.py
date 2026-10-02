@@ -25,20 +25,23 @@ class FederatedUNet3D(nn.Module):
         in_channels: int = IN_CHANNELS,
         num_classes: int = NUM_CLASSES,
         feature_dim: int = FEATURE_DIM,
+        width: int = 16,
+        depth: int = 5,
     ) -> None:
         super().__init__()
-        self._init_args = (in_channels, num_classes, feature_dim)
+        self._init_args = (in_channels, num_classes, feature_dim, width, depth)
+        channels = tuple(width * 2**i for i in range(depth))
         self.backbone = UNet(
             spatial_dims=3,
             in_channels=in_channels,
             out_channels=num_classes,
-            channels=(16, 32, 64, 128, 256),
-            strides=(2, 2, 2, 2),
+            channels=channels,
+            strides=(2,) * (depth - 1),
             num_res_units=2,
         )
         # No pretrained weights are loaded anywhere in this class — MONAI's UNet
         # initializes its own layers randomly by construction.
-        self._bottleneck_channels = 256
+        self._bottleneck_channels = channels[-1]
         self.feature_pool = nn.AdaptiveAvgPool3d(1)
         self.feature_proj = nn.Linear(self._bottleneck_channels, feature_dim)
 
@@ -102,5 +105,5 @@ class FederatedUNet3D(nn.Module):
         return seg_logits, features
 
 
-def build_model() -> FederatedUNet3D:
-    return FederatedUNet3D()
+def build_model(width: int = 16, depth: int = 5) -> FederatedUNet3D:
+    return FederatedUNet3D(width=width, depth=depth)

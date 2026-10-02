@@ -14,7 +14,7 @@ from .checkpoint import checkpoint_dir_for, load_checkpoint, prune_old_checkpoin
 from .config import TrainConfig
 from .data import build_dataset
 from .model import FederatedUNet3D, build_model
-from .region_loss import RegionDiceBCELoss
+from .region_loss import RegionDiceBCELoss, RegionHybridLoss
 
 
 def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
@@ -30,7 +30,7 @@ def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
         scheduler.step()
 
 
-def _build_loss(loss_kind: str):
+def _build_loss(loss_kind: str, class_weights: list[float] | None = None):
     """dice_ce (original): plain CrossEntropy has no notion of a rare class --
     ET is the smallest region by voxel count of the 4, and a real overnight run
     on real data (2026-09-22) showed ET-specific held-out Dice declining while
@@ -43,12 +43,27 @@ def _build_loss(loss_kind: str):
 
     region_dice_bce (SPEC.md Addendum 5): Dice + BCE on the three scored regions (WT/TC/ET), read
     off the same 5-way softmax by summing probabilities -- see region_loss.py.
+
+    region_hybrid (Addendum 6): region_dice_bce + dice_ce with equal weights, so ET keeps direct
+    per-class pressure (region_dice_bce alone under-segmented ET in its first real run).
+
+    region_terms (Addendum 7, diagnostic): "dice" or "bce" trains only that half of region_dice_bce.
+    et_pos_weight (Addendum 8): weight on positive ET voxels in region_dice_bce's ET BCE term.
     """
+    if et_pos_weight != 1.0 and (loss_kind != "region_dice_bce" or region_terms == "dice"):
+        raise ValueError(f"et_pos_weight={et_pos_weight!r} only applies to loss_kind='region_dice_bce' with a BCE "
+                         f"term, got loss_kind={loss_kind!r}, region_terms={region_terms!r}")
+    if region_terms != "both" and loss_kind != "region_dice_bce":
+        raise ValueError(f"region_terms={region_terms!r} only applies to loss_kind='region_dice_bce', got {loss_kind!r}")
     if loss_kind == "dice_ce":
-        return DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)
+        weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+        return DiceCELoss(to_onehot_y=True, softmax=True, include_background=True, weight=weight)
     if loss_kind == "dice_focal":
-        return DiceFocalLoss(to_onehot_y=True, softmax=True, include_background=True, gamma=2.0)
+        weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
+        return DiceFocalLoss(to_onehot_y=True, softmax=True, include_background=True, gamma=2.0, weight=weight)
     if loss_kind == "region_dice_bce":
+        if class_weights is not None:
+            raise ValueError("class_weights cannot be used with region_dice_bce")
         return RegionDiceBCELoss()
     raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal' or 'region_dice_bce', got {loss_kind!r}")
 
@@ -116,9 +131,9 @@ def train_single_client(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_amp = device.type == "cuda"
 
-    model = (model or build_model()).to(device)
+    model = (model or build_model(config.model_width, config.model_depth)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-    loss_fn = _build_loss(loss_kind)
+    loss_fn = _build_loss(loss_kind, config.class_weights).to(device)
 
     dataset = build_dataset(
         manifest_path, data_mode=config.data_mode, cache_path=config.cache_path,
@@ -141,9 +156,12 @@ def train_single_client(
             )
 
     scheduler = None
-    if lr_horizon is not None:
+    effective_lr_horizon = lr_horizon if lr_horizon is not None else config.lr_horizon
+    if config.schedule_kind == "cosine" and effective_lr_horizon is None:
+        effective_lr_horizon = num_epochs
+    if config.schedule_kind == "cosine" or (config.schedule_kind == "none" and lr_horizon is not None):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max(lr_horizon, 1), eta_min=1e-5)
+            optimizer, T_max=max(effective_lr_horizon or 1, 1), eta_min=config.schedule_min_lr)
         # optimizer.load_state_dict() above (if resumed) restored the ALREADY-
         # decayed lr; stepping the scheduler from there would decay it a
         # second time. Restart the replay from base_lr, same fix as
@@ -151,7 +169,7 @@ def train_single_client(
         for group, base_lr in zip(optimizer.param_groups, scheduler.base_lrs):
             group["lr"] = base_lr
         for _ in range(start_epoch):
-            _step_scheduler_clamped(scheduler, lr_horizon)
+            _step_scheduler_clamped(scheduler, effective_lr_horizon or 1)
 
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
@@ -206,7 +224,7 @@ def train_single_client(
 
         current_lr = optimizer.param_groups[0]["lr"]
         if scheduler is not None:
-            _step_scheduler_clamped(scheduler, lr_horizon)
+            _step_scheduler_clamped(scheduler, effective_lr_horizon or 1)
 
         ckpt_path = save_checkpoint(
             config.checkpoint_dir,
@@ -216,6 +234,8 @@ def train_single_client(
             optimizer.state_dict(),
             extra={"avg_loss": avg_loss, "n_skipped_nonfinite": n_skipped, "lr": current_lr,
                   "loss_kind": loss_kind},
+            model_width=config.model_width,
+            model_depth=config.model_depth,
         )
         if best_tracker is not None and (epoch + 1) % eval_every == 0:
             evaluate_and_track(model, heldout_scorer, best_tracker, epoch, ckpt_path, run_dir)

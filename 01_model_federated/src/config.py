@@ -1,7 +1,65 @@
 """Config dataclass shared by single-client and federated training loops."""
 from __future__ import annotations
 
+from pathlib import Path
 from dataclasses import dataclass, field
+
+import yaml
+
+
+DEFAULT_CONFIG = {
+    "model": {"width": 16, "depth": 5},
+    "loss": {"kind": "dice_ce", "class_weights": None},
+    "schedule": {"kind": "none", "min_lr": 1.0e-5},
+    "augmentation": {
+        "flip_prob": 0.5,
+        "rotate_prob": 0.3,
+        "rotate_range_deg": 10.0,
+        "zoom_prob": 0.3,
+        "zoom_min": 0.9,
+        "zoom_max": 1.1,
+        "scale_intensity_factor": 0.1,
+        "scale_intensity_prob": 0.3,
+        "shift_intensity_offset": 0.1,
+        "shift_intensity_prob": 0.3,
+        "gaussian_noise_prob": 0.2,
+        "gaussian_noise_std": 0.05,
+        "modality_dropout_prob": 0.0,
+        "sequence_shift_prob": 0.0,
+        "sequence_shift_max_voxels": 1.2,
+    },
+}
+
+
+def load_config(path: str | Path) -> dict:
+    """Load and validate the model, loss, schedule, and augmentation YAML."""
+    with Path(path).open("r", encoding="utf-8") as file:
+        raw = yaml.safe_load(file) or {}
+
+    config = {
+        section: {**defaults, **(raw.get(section) or {})}
+        for section, defaults in DEFAULT_CONFIG.items()
+    }
+    model = config["model"]
+    if not isinstance(model["width"], int) or isinstance(model["width"], bool) or model["width"] < 1:
+        raise ValueError("model.width must be an integer >= 1")
+    if not isinstance(model["depth"], int) or isinstance(model["depth"], bool) or model["depth"] < 2:
+        raise ValueError("model.depth must be an integer >= 2")
+
+    loss = config["loss"]
+    if loss["kind"] not in {"dice_ce", "dice_focal", "region_dice_bce"}:
+        raise ValueError(f"loss.kind must be dice_ce, dice_focal, or region_dice_bce; got {loss['kind']!r}")
+    weights = loss["class_weights"]
+    if weights is not None and (
+        not isinstance(weights, list)
+        or len(weights) != 5
+        or any(not isinstance(weight, (int, float)) or isinstance(weight, bool) for weight in weights)
+    ):
+        raise ValueError("loss.class_weights must be null or a list of exactly 5 numbers")
+
+    if config["schedule"]["kind"] not in {"cosine", "none"}:
+        raise ValueError(f"schedule.kind must be cosine or none; got {config['schedule']['kind']!r}")
+    return config
 
 
 @dataclass
@@ -29,6 +87,12 @@ class TrainConfig:
     coral_weight: float = 1.0
     coral_queue_size: int = 8
     coral_steps_per_round: int | None = None
+    model_width: int = 16
+    model_depth: int = 5
+    class_weights: list[float] | None = None
+    schedule_kind: str = "none"
+    schedule_min_lr: float = 1.0e-5
+    lr_horizon: int | None = None
 
     # Checkpointing
     run_id: str = "default_run"
