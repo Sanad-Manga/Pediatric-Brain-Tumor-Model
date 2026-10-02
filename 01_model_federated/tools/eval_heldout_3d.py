@@ -55,7 +55,11 @@ REGION_ORDER, aggregate, dice_regions = _metrics.REGION_ORDER, _metrics.aggregat
 
 def load_model(checkpoint_path: Path, device: str) -> FederatedUNet3D:
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    model = FederatedUNet3D()
+    model_config = payload.get("model_config", {})
+    model = FederatedUNet3D(
+        width=int(model_config.get("width", 16)),
+        depth=int(model_config.get("depth", 5)),
+    )
     model.load_state_dict(payload["model_state"])
     model.to(device).eval()
     print(f"loaded epoch {payload.get('epoch')} | avg_loss {payload.get('avg_loss')} "

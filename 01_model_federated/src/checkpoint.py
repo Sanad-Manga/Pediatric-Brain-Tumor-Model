@@ -23,6 +23,8 @@ def save_checkpoint(
     model_state: dict[str, Any],
     optimizer_state: dict[str, Any],
     extra: dict[str, Any] | None = None,
+    model_width: int | None = None,
+    model_depth: int | None = None,
 ) -> Path:
     d = checkpoint_dir_for(base_dir, run_id)
     path = d / f"epoch_{epoch}.pt"
@@ -33,6 +35,8 @@ def save_checkpoint(
     }
     if extra:
         payload.update(extra)
+    if model_width is not None and model_depth is not None:
+        payload["model_config"] = {"width": model_width, "depth": model_depth}
     torch.save(payload, path)
     return path
 

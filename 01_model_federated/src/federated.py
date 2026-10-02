@@ -49,12 +49,17 @@ def train_federated(
     client's subject count) into a new global model. Checkpointed every round
     under <config.checkpoint_dir>/<config.run_id>/epoch_<round>.pt.
     """
+    if config.class_weights is not None:
+        raise ValueError("class_weights cannot be used with --use-federation")
     if len(client_manifest_paths) < 2:
         raise ValueError("Federated training requires at least 2 client manifests")
 
     client_subject_counts = [len(load_manifest(p)) for p in client_manifest_paths]
 
-    global_model = build_model()
+    if config.model_width == 16 and config.model_depth == 5:
+        global_model = build_model()
+    else:
+        global_model = build_model(config.model_width, config.model_depth)
     start_round = 0
     round_losses: list[list[float]] = []
 
@@ -111,6 +116,8 @@ def train_federated(
             global_model.state_dict(),
             dummy_optimizer.state_dict(),
             extra={"round": round_idx, "coral_loss": coral_round_loss},
+            model_width=config.model_width,
+            model_depth=config.model_depth,
         )
 
     return global_model, round_losses
