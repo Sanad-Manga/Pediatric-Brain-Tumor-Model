@@ -1,169 +1,282 @@
 import streamlit as st
 import numpy as np
 import json
+import pandas as pd
 from pathlib import Path
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
-# from components.theme import apply_theme # Uncomment and use if a specific global theme is required
-
-# Streamlit page configuration
-st.set_page_config(page_title="Model Comparison", page_icon="🔍", layout="wide")
+import plotly.graph_objects as go
 
 # Directory setup
 BASE_DIR = Path(__file__).resolve().parents[1]
 COMPARISON_CACHE = BASE_DIR / "comparison_cache"
 DEMO_CACHE = BASE_DIR / "demo_cache"
 
-# Segmentation Colors Map
-# 0: Background (Transparent)
-# 1: Enhancing Tumor - ET (Red)
-# 2: Non-Enhancing Core - NETC (Blue)
-# 3: Cystic Component - CC (Green)
-# 4: Peritumoral Edema - ED (Yellow)
-COLORS = [
-    [0.0, 0.0, 0.0, 0.0],
-    [1.0, 0.0, 0.0, 0.6],
-    [0.0, 0.0, 1.0, 0.6],
-    [0.0, 1.0, 0.0, 0.6],
-    [1.0, 1.0, 0.0, 0.6]
-]
-CMAP = ListedColormap(COLORS)
+# Inject Custom CSS matching the Modern SaaS theme
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+* { font-family: 'Inter', "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif; }
+
+.page-hero {
+    background: linear-gradient(135deg, #FFFFFF 0%, #F0F9FF 60%, #E0F2FE 100%);
+    border: 1px solid rgba(14, 165, 233, 0.15); border-radius: 20px;
+    padding: 30px 40px; margin-bottom: 25px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.02);
+}
+.page-title {
+    font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; font-family: 'Outfit', sans-serif;
+    color: #0F172A; margin-bottom: 8px;
+}
+.page-sub { color: #475569; font-size: 0.95rem; line-height: 1.6; }
+.badge-ok { background:#D1FAE5; color:#065F46; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+.badge-review { background:#FEF3C7; color:#92400E; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+
+.review-alert {
+    background-color: #FDF4FF;
+    border-left: 4px solid #D946EF;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 10px rgba(217, 70, 239, 0.05);
+}
+.review-title {
+    color: #86198F;
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.review-desc {
+    color: #A21CAF;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Make st.metric look elegant */
+[data-testid="stMetric"] {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+}
+</style>
+""", unsafe_allow_html=True)
 
 def load_patient_list():
-    """Retrieve all patients available in the comparison cache."""
     if not COMPARISON_CACHE.exists():
         return []
-    return [d.name for d in COMPARISON_CACHE.iterdir() if d.is_dir()]
+    return sorted([d.name for d in COMPARISON_CACHE.iterdir() if d.is_dir()])
 
 def load_patient_data(patient_id):
-    """Load metadata and label arrays for a specific patient."""
     patient_dir = COMPARISON_CACHE / patient_id
     
     with open(patient_dir / "meta.json", "r") as f:
         meta = json.load(f)
-        
     lbl_2d = np.load(patient_dir / "labels_2d.npz")["labels"]
     lbl_3d = np.load(patient_dir / "labels_3d.npz")["labels"]
     lbl_rstar = np.load(patient_dir / "labels_rstar.npz")["labels"]
     
-    return meta, lbl_2d, lbl_3d, lbl_rstar
+    # ─── Load Issue #44 Flagged Spots (Graceful Fallback) ───
+    review_mask = None
+    review_spots = []
+    
+    mask_path = patient_dir / "review_mask.npz"
+    spots_path = patient_dir / "review_spots.json"
+    
+    if mask_path.exists() and spots_path.exists():
+        review_mask = np.load(mask_path)["mask"]
+        with open(spots_path, "r") as f:
+            review_spots = json.load(f)
+            
+    return meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots
 
 def get_background_slice(patient_id, slice_idx):
-    """Attempt to load the MRI background slice from the demo cache."""
     bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx}.npz"
     if bg_path.exists():
         data = np.load(bg_path)
-        # Fallback to the first available sequence if t1c is not directly accessible
         return data["t1c"] if "t1c" in data else data[data.files[0]]
     return None
 
+def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False):
+    """Generate an interactive Plotly visualization for MRI, segmentation, and review flags."""
+    fig = go.Figure()
+    
+    # Render MRI Background
+    if bg_img is not None:
+        fig.add_trace(go.Heatmap(z=bg_img, colorscale='gray', showscale=False, hoverinfo='skip'))
+    else:
+        fig.add_trace(go.Heatmap(z=np.zeros_like(mask_img), colorscale='gray', showscale=False, hoverinfo='skip'))
+        
+    # Render Base Segmentation Overlay
+    if show_mask:
+        mask_display = np.where(mask_img == 0, np.nan, mask_img)
+        colorscale = [
+            [0.00, 'rgba(0,0,0,0)'],
+            [0.25, 'rgba(239,68,68,0.65)'],   # 1: ET (Red)
+            [0.50, 'rgba(16,185,129,0.65)'],  # 2: NETC (Green)
+            [0.75, 'rgba(59,130,246,0.65)'],  # 3: CC (Blue)
+            [1.00, 'rgba(234,179,8,0.65)']    # 4: ED (Yellow)
+        ]
+        fig.add_trace(go.Heatmap(z=mask_display, colorscale=colorscale, zmin=0, zmax=4, showscale=False, hoverinfo='skip'))
+
+    # Render Flagged Review Spots (High-visibility Magenta)
+    if show_review and review_img is not None:
+        review_display = np.where(review_img == 0, np.nan, 1)
+        review_colorscale = [
+            [0.0, 'rgba(0,0,0,0)'],
+            [1.0, 'rgba(217,70,239,0.9)'] # Magenta
+        ]
+        fig.add_trace(go.Heatmap(z=review_display, colorscale=review_colorscale, zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
+
+    fig.update_layout(
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False, autorange='reversed'),
+        margin=dict(l=0, r=0, t=0, b=0),
+        plot_bgcolor='black',
+        paper_bgcolor='rgba(0,0,0,0)',
+        height=320
+    )
+    return fig
+
 def main():
-    st.title("🔍 Multi-Model Segmentation Comparison")
     st.markdown("""
-    Evaluate the **2D**, **3D**, and combined **R*** models side-by-side. 
-    Select a patient from the dataset to visualize axial slices and review performance metrics.
-    """)
+    <div class="page-hero">
+        <div class="page-title">🔍 Model Comparison Matrix</div>
+        <div class="page-sub">Evaluate architectural variants side-by-side. Compare the 2D ensemble, 3D family, and the R* fusion approach against ground truth metrics.</div>
+    </div>
+    """, unsafe_allow_html=True)
     
     patients = load_patient_list()
     if not patients:
-        st.error("Comparison cache is missing. Please verify the `comparison_cache/` directory.")
+        st.error("Comparison cache directory not found or empty.")
         return
         
-    selected_patient = st.selectbox("Select Patient Record 👤", sorted(patients))
+    selected_patient = st.selectbox("Select Patient Record", patients)
     
     if selected_patient:
-        meta, lbl_2d, lbl_3d, lbl_rstar = load_patient_data(selected_patient)
+        meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots = load_patient_data(selected_patient)
         
-        # Guardrails and Status Badges
+        # Status Badges
         status = meta.get("rstar_status", "unknown")
         warnings = meta.get("rstar_warnings", [])
         
-        if status == "ok" and not warnings:
-            st.success("✅ **Quality Check:** Passed. The R* preprocessing pipeline encountered no issues.")
-        else:
-            st.warning(f"⚠️ **R* Status:** {status.upper()}")
-            for w in warnings:
-                st.error(f"🚨 **Analysis Warning:** {w}")
-        
+        st.markdown(f"**R* Pipeline Status:** <span class='badge-{'ok' if status == 'ok' else 'review'}'>{status.upper()}</span>", unsafe_allow_html=True)
+        for w in warnings:
+            st.warning(f"⚠️ **Warning:** {w}")
+            
         st.divider()
         
-        # Visualization Section
-        st.subheader("🧠 Volumetric Slice Visualization")
+        # Controls
+        max_slice = lbl_rstar.shape[2] - 1
+        has_review = len(review_spots) > 0
         
-        # Controls layout
-        ctrl_col1, ctrl_col2 = st.columns([2, 1])
-        with ctrl_col1:
-            max_slice = lbl_rstar.shape[2] - 1
-            slice_idx = st.slider("Navigate Axial Slice (Z-Axis)", min_value=0, max_value=max_slice, value=max_slice // 2)
-        with ctrl_col2:
-            st.write("") # Vertical spacing alignment
-            show_mask = st.toggle("Show Tumor Segmentation Overlay", value=True)
+        if has_review:
+            col_slider, col_toggle1, col_toggle2 = st.columns([2, 1, 1])
+        else:
+            col_slider, col_toggle1 = st.columns([3, 1])
+            
+        with col_slider:
+            slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, max_slice // 2)
+            
+        with col_toggle1:
+            st.write("") 
+            show_mask = st.toggle("Overlay Segmentation", value=True)
+            
+        show_review = False
+        if has_review:
+            with col_toggle2:
+                st.write("")
+                show_review = st.toggle("🟣 Show Flagged Spots", value=True)
             
         bg_img = get_background_slice(selected_patient, slice_idx)
-        
         if bg_img is None:
-            st.info("ℹ️ **Notice:** Original MRI background scans are restricted to demo patients only. Displaying segmentation masks on a dark background.")
-        
-        # Render the 3 Models
+            st.info("ℹ️ Original MRI sequence unavailable for this record. Displaying masks on dark background.")
+            
+        # Interactive Viewers
         img_col1, img_col2, img_col3 = st.columns(3)
-        model_configs = [
-            ("2D Architecture", lbl_2d, img_col1),
-            ("3D Architecture", lbl_3d, img_col2),
-            ("R* (Combined Approach)", lbl_rstar, img_col3)
-        ]
+        rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
-        for model_name, lbl_vol, col in model_configs:
-            with col:
-                st.markdown(f"#### {model_name}")
-                fig, ax = plt.subplots(figsize=(5, 5))
-                ax.axis('off')
-                fig.patch.set_facecolor('black') 
-                
-                # Render Background
-                if bg_img is not None:
-                    ax.imshow(bg_img, cmap='gray')
-                else:
-                    # Provide a black canvas if no MRI background is available
-                    ax.imshow(np.zeros((lbl_vol.shape[0], lbl_vol.shape[1])), cmap='gray')
-                
-                # Render Segmentation Overlay
-                if show_mask:
-                    slice_mask = lbl_vol[:, :, slice_idx]
-                    masked_data = np.ma.masked_where(slice_mask == 0, slice_mask)
-                    ax.imshow(masked_data, cmap=CMAP, interpolation='none', vmin=0, vmax=4)
-                    
-                st.pyplot(fig, transparent=True)
-                plt.close(fig)
+        # NOTE: Added unique 'key' arguments to fix the StreamlitDuplicateElementId Error
+        with img_col1:
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
+            st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
+        with img_col2:
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D Architecture</h4>", unsafe_allow_html=True)
+            st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
+        with img_col3:
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>R* (Fusion)</h4>", unsafe_allow_html=True)
+            st.plotly_chart(create_plotly_viewer(bg_img, lbl_rstar[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
+
+        # ─── Expert Review Section (Issue #44) ───
+        if has_review:
+            st.markdown(f"""
+            <div class="review-alert">
+                <div class="review-title">🟣 {len(review_spots)} spots flagged for review</div>
+                <div class="review-desc">Flagged spots are areas the model is unsure about and are meant for expert review, not a diagnosis.</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            df_spots = pd.DataFrame(review_spots)
+            df_spots.rename(columns={
+                "spot_id": "Spot ID",
+                "voxels": "Volume (Voxels)",
+                "mean_et_prob": "Confidence (Mean Prob)",
+                "models_agree": "Models Agreement",
+                "reason": "Reason Flagged"
+            }, inplace=True)
+            
+            st.dataframe(
+                df_spots,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Spot ID": st.column_config.NumberColumn(format="%d"),
+                    "Volume (Voxels)": st.column_config.NumberColumn(format="%d"),
+                    "Confidence (Mean Prob)": st.column_config.NumberColumn(format="%.3f"),
+                    "Models Agreement": st.column_config.NumberColumn(format="%.3f"),
+                    "Reason Flagged": st.column_config.TextColumn()
+                }
+            )
 
         st.divider()
         
-        # Metrics Dashboard
-        st.subheader("📊 Dynamic Performance Metrics")
-        st.caption("Dice similarity coefficient per model for Enhancing Tumor (ET), Tumor Core (NC), and Whole Tumor (WT).")
+        # ─── Multi-Model Metrics Dashboard ───
+        st.markdown("<h3 style='font-family: Outfit, sans-serif; color: #0F172A;'>📊 Multi-Model Performance Comparison</h3>", unsafe_allow_html=True)
+        st.caption("Dice similarity coefficient per region across all architectures.")
         
-        metrics_data = meta.get("regions", {})
-        m_col1, m_col2, m_col3 = st.columns(3)
+        regions = ["ET", "NC", "WT"]
+        metrics_2d = meta.get("regions", {}).get("2d", {})
+        metrics_3d = meta.get("regions", {}).get("3d", {})
+        metrics_rstar = meta.get("regions", {}).get("rstar", {})
         
-        metric_configs = [
-            ("2d", m_col1, "2D Model Performance"),
-            ("3d", m_col2, "3D Model Performance"),
-            ("rstar", m_col3, "R* Model Performance")
-        ]
+        met_col1, met_col2, met_col3 = st.columns(3)
         
-        for dict_key, column, display_title in metric_configs:
-            with column:
-                st.markdown(f"**{display_title}**")
-                model_metrics = metrics_data.get(dict_key, {})
+        with met_col1:
+            st.markdown("**2D Baseline**")
+            for r in regions:
+                val = metrics_2d.get(r, {}).get("dice", "N/A")
+                st.metric(label=f"{r} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
                 
-                for region in ["ET", "NC", "WT"]:
-                    region_metrics = model_metrics.get(region, {})
-                    dice_score = region_metrics.get("dice", "N/A")
-                    
-                    # Formatting numerical layout elegantly
-                    if isinstance(dice_score, float):
-                        st.metric(label=f"{region} Dice Score", value=f"{dice_score:.4f}")
-                    else:
-                        st.metric(label=f"{region} Dice Score", value=dice_score)
+        with met_col2:
+            st.markdown("**3D Family**")
+            for r in regions:
+                val = metrics_3d.get(r, {}).get("dice", "N/A")
+                st.metric(label=f"{r} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
+                
+        with met_col3:
+            st.markdown("<b style='color:#0EA5E9;'>R* Fusion</b>", unsafe_allow_html=True)
+            for r in regions:
+                val_rstar = metrics_rstar.get(r, {}).get("dice", "N/A")
+                val_2d = metrics_2d.get(r, {}).get("dice", 0.0)
+                
+                # Show value, but keep the nice delta comparison against 2D!
+                if isinstance(val_rstar, float) and isinstance(val_2d, float):
+                    st.metric(label=f"{r} Dice", value=f"{val_rstar:.4f}", delta=f"{(val_rstar - val_2d):.4f} vs 2D")
+                else:
+                    st.metric(label=f"{r} Dice", value=val_rstar)
 
 if __name__ == "__main__":
     main()
