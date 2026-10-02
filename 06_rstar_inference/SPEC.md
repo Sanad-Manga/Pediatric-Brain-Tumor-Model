@@ -1,5 +1,7 @@
 # Spec: R* inference module (Section 06: rstar_inference)
 
+> **Addendum 1 (2026-10-02) — spot-level review flags and the error scorecard (team decisions Q1 = C, Q2 = D):** §2, §3, §4 (Req 22-28), §5, §6 and §7 were extended. This is a *forward* plan. The bio-tech doctor said missed and false enhancing tumour (ET) are both unacceptable, and that uncertain areas may be flagged for (biopsy) review. Today the 500 mm³ rule silently relabels all predicted ET as non-enhancing when a patient's total ET is small: on 81 held-out patients it removes 24 real small ET spots to remove 46 false ones, and this week every 30-patient comparison was decided by a few 500-1,000 voxel false ET spots that survived it. This addendum adds a **standalone** module that splits predicted ET into separate spots, describes each (size, confidence, agreement between the model sources) and marks each spot `keep` or `review`; plus a scorecard that counts errors per spot, including **silent** errors (a false spot kept, or a real lesion not covered by any kept or review spot). It is **not wired into `RStarSegmenter`** (the deployed pipeline and its outputs are unchanged); integration is a later, evidence-gated step. The "uncertainty" out-of-scope line of §3 is narrowed accordingly: spot-level review flags from fixed, documented thresholds are in scope; learned or calibrated confidence remains out of scope.
+>
 ## 1. Goal
 A standalone, guard-railed Python package (`rstar`) that segments one co-registered BraTS-space pediatric brain MRI with the 2D+3D fusion recipe measured on 2026-09-26 (0.805 mean Dice on 30 patients that were never used to train or choose anything, against 0.711 for the shipped 2D ensemble), and fails loudly, not silently, when its inputs or its own geometry are wrong.
 
@@ -16,6 +18,12 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - **Dependency injection:** `RStarSegmenter(config, models_2d=None, models_3d=None, run_self_check=None)`. Stub models can be supplied for tests. When models are loaded from checkpoints, `self_check` runs once per process unless `run_self_check=False`.
 - **Defaults in `RStarConfig`:** `w3d=0.5`, `background_scale=0.5`, `et_min_mm3=500.0`, `voxel_mm3=1.0`, `agreement_review=0.70`, `agreement_strong=0.10`, `expected_shape=(240, 240, 155)` (overridable so tests can use tiny volumes), `verify_hashes=True`, `device='auto'` (CUDA when available).
 - **README.md** stating the input contract, the modes and statuses, and: *validated on US BraTS-PEDs only; needs radiologist review; not a medical device*.
+- **Review flags (Addendum 1), new module `rstar/review_flags.py`, numpy + scipy only:**
+  - `find_et_spots(labels, et_prob, source_et_masks=())` -> `(spot_ids, spots)`: 26-connected components of `labels == 1` numbered 1..k in scan order; `spot_ids` is a `uint16` volume (0 = no spot). Each `Spot` (frozen dataclass) has `spot_id`, `voxels`, `mean_et_prob`, `max_et_prob`, and `agreement` = the mean over the given boolean source masks of the fraction of the spot's voxels that source marks ET (`None` when no sources are given).
+  - `decide(spots, size_cut, prob_cut, agree_cut, small_cut=500)` -> one `Decision(spot_id, action, reason)` per spot: `action = "review"` if `voxels < size_cut`, or `mean_et_prob < prob_cut`, or (`agreement` is not None and `agreement < agree_cut`); otherwise `"keep"`. `reason` for a review spot is the first that applies in this order: `"small"` (`voxels < small_cut`), `"borderline"` (`small_cut <= voxels < size_cut`), `"low_confidence"`, `"models_disagree"`; `reason` is `None` for kept spots.
+  - `review_outputs(spot_ids, spots, decisions)` -> `(review_mask, review_spots)`: `review_mask` uint8 (same shape) holding 1..m for review spots only (renumbered consecutively), 0 elsewhere; `review_spots` a JSON-serialisable list of `{"spot_id", "voxels", "mean_et_prob", "models_agree", "reason"}` using the renumbered ids. This is the file format of issue #44.
+  - `score_patient(spot_ids, spots, decisions, gt_labels)` -> dict: GT lesions = 26-connected components of `gt_labels == 1`. Per predicted spot: real if it overlaps GT ET, else false. Per GT lesion: `caught_keep` if it overlaps a kept spot, else `caught_review` if it overlaps a review spot, else `missed`. Returns integer counts `kept_real`, `kept_false`, `review_real`, `review_false`, `lesions`, `lesions_caught_keep`, `lesions_caught_review`, `lesions_missed`, plus `silent_false = kept_false`, `silent_missed = lesions_missed`, and `et_dice_kept` (ET Dice with only kept spots as ET) and `et_dice_with_review` (kept + review as ET), each 1.0 when both prediction and truth are empty.
+  - `t500_decisions(spots, total_et_voxels, voxel_mm3=1.0, min_mm3=500.0)` -> today's rule expressed as decisions: every spot `keep` if `total_et_voxels * voxel_mm3 >= min_mm3`, else every spot `"drop"` (relabelled away, i.e. neither kept nor reviewed). `score_patient` accepts `"drop"` and treats a dropped spot as absent.
 
 ## 3. Out of Scope
 - Registration, skull-stripping, resampling to BraTS space, DICOM I/O, NIfTI header repair.
@@ -24,6 +32,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - Uncertainty calibration or a learned confidence score. The agreement flag is a weak soft signal only; the module never withholds labels because of low agreement (one genuine 2D collapse on a correctly aligned held-out patient had agreement 0.000).
 - **Any claim of clinical validity or of performance on non-US data.** Reported numbers are US BraTS-PEDs only.
 - Bundling checkpoints into the repository.
+- **(Addendum 1)** Wiring review flags into `RStarSegmenter`, its CLI or its outputs; any change to existing `rstar` modules, the deployed models or the Oct-6 comparison package; choosing threshold values in code (evaluation runs pass them explicitly; defaults exist only as documented keyword defaults where stated); learned/calibrated uncertainty; any evaluation script with data paths (those live outside the repository); the Streamlit display (issue #44).
 
 ## 4. Requirements
 
@@ -48,6 +57,13 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 19. `import rstar` does not modify `sys.path` and does not import section 01 or 03 code until models are loaded.
 20. `README.md` contains the phrases "US BraTS-PEDs only", "radiologist review" and "not a medical device", and documents the input contract and the two modes.
 21. Slow regression test (skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): three fresh-30 patients run end to end reproduce the reference per-patient NC, WT and ET (rule applied) Dice stored in `tests/fixtures/rstar_reference_scores.json`, taken from the 2026-09-26 post-hoc run, within 0.002; the shipped checkpoint hashes in `models.default.json` match the real files.
+22. Spots: on hand-built volumes, `find_et_spots` finds exactly the 26-connected ET components (two blocks touching only at a corner are ONE spot; blocks one voxel apart are two), numbers them 1..k, and reports `voxels`, `mean_et_prob`, `max_et_prob` exactly (1e-6); with two source masks covering 100% and 50% of a spot its `agreement` is 0.75 exactly; with no sources it is `None`; a volume with no ET gives an all-zero `spot_ids` and an empty list; mismatched shapes raise `ValueError` naming both shapes.
+23. Decisions: for hand-built spots, `decide` returns `keep`/`review` and the reason exactly as specified, with boundaries pinned (`voxels == size_cut` keeps; `voxels == small_cut` is borderline, not small; `mean_et_prob == prob_cut` keeps; `agreement == agree_cut` keeps), the reason priority order respected when several apply, and `agreement=None` never triggering `models_disagree`. Invalid thresholds (negative size cuts, `small_cut > size_cut`, probabilities or agreement outside [0, 1], NaN) raise `ValueError` naming the value.
+24. Outputs: `review_outputs` produces a uint8 mask of the input shape containing exactly the review spots renumbered 1..m in their original order (kept spots are 0), and a list whose entries have exactly the five keys, the renumbered ids, Python `int`/`float`/`str`/`None` values only (`json.dumps` succeeds), and `models_agree` equal to the spot's agreement (or `None`).
+25. Scorecard: on a hand-built patient with a known mix (a kept real spot, a kept false spot, a review real spot, a review false spot, a GT lesion covered by nothing, a GT lesion covered only by a review spot), every count returned by `score_patient` is exact, `silent_false == kept_false`, `silent_missed == lesions_missed`, and both Dice values equal hand-computed values (1e-9); an ET-free patient with no spots gives Dice 1.0 for both and all counts 0.
+26. Today's rule: `t500_decisions` drops every spot when total ET is below 500 mm³ (respecting `voxel_mm3`) and keeps every spot otherwise (exactly 500 keeps), and `score_patient` with those decisions gives the same `et_dice_kept` as scoring the labels produced by the existing `fusion.apply_small_et_rule` on the same volume (1e-9), for at least a below-threshold, an at-threshold and an above-threshold case.
+27. Robustness: integer, boolean or float `labels`/`gt_labels` arrays of the same shape are accepted; `et_prob` outside [0, 1] or with NaN raises `ValueError`; source masks of another shape raise `ValueError`; a spot touching the volume edge is handled; everything is deterministic.
+28. Isolation and regression: the only changed or new files are `rstar/review_flags.py`, `tests/test_review_flags.py` and `SPEC.md`; every other file in `06_rstar_inference/` is byte-identical; `rstar/pipeline.py` does not import `review_flags`; every pre-existing `06_rstar_inference` test passes unedited.
 
 **Assumption:** The negative-voxel limits (1% warn, 5% error) were set after the regression run showed that real BraTS-PEDs scans do contain negative voxels (0.03-0.47% in the four sequences of one fresh patient); the first draft of this spec wrongly rejected any negative value.
 **Assumption:** The thresholds 0.15 and 0.25 (background fraction) come from BraTS volumes being 30–60% background; a non-stripped scan has almost no exactly-zero voxels. They are judgment calls, not tuned.
@@ -55,6 +71,9 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 **Assumption:** Three-or-fewer-sequence inputs run through the 3D family only because that is the only measured-robust path (3D dropout members were trained with sequences hidden); two-or-more absent is unvalidated, hence `'review'`.
 **Assumption:** The module returns a single case per call, on one device, in float32; memory use is a full-resolution five-class probability volume per branch (about 180 MB each at 240×240×155).
 **Assumption:** Voxel volume is 1 mm³ for the BraTS grid; the mm³ form of the 500-voxel rule is the same rule expressed in physical units.
+
+**Assumption (Addendum 1):** "Agreement" is measured per spot against each source's own argmax-ET mask (the 4 3D members and the 2D model in evaluation runs), so it needs no ground truth and costs one extra argmax per source; the earlier whole-patient agreement (guards.py) was too coarse, catching 19-40% of bad cases, because it measured whole-tumour overlap rather than the ET spots where the errors are.
+**Assumption (Addendum 1):** A dropped spot under today's rule is treated as absent (it becomes non-enhancing core, which is how the existing rule scores); review spots count as caught for lesion-level scoring but are NOT counted as ET for `et_dice_kept`. Both Dice views are reported so neither framing hides the other.
 
 ## 5. Structure
 
@@ -72,6 +91,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 │   ├── sections.py               # alias import of section 01 / 03 `src` packages
 │   ├── models.py                 # hash-verified loading of the 2D ensemble and the 3D family
 │   ├── fusion.py                 # fuse, small-ET rule (mm^3), agreement
+│   ├── review_flags.py           # spot-level review flags + per-spot error scorecard (addendum 1; NOT used by pipeline.py)
 │   ├── guards.py                 # agreement statuses, self_check, SelfCheckError
 │   ├── pipeline.py               # RStarSegmenter.segment / segment_paths
 │   └── cli.py                    # python -m rstar
@@ -84,6 +104,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
     ├── test_pipeline.py          # Req 13-17
     ├── test_cli_readme.py        # Req 18, 20
     ├── test_regression.py        # Req 21 (slow, skipped without data)
+    ├── test_review_flags.py      # Req 22-28 (addendum 1)
     └── fixtures/rstar_reference_scores.json
 ```
 
@@ -112,7 +133,10 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 | A frame/orientation bug introduced in a later edit | `self_check()` raises `SelfCheckError` before any patient is segmented |
 | `import src` elsewhere in the process | Unaffected by loading the section packages |
 | Input array is a read-only view | Accepted; never written to |
-
+| Two ET blobs touching only at a corner (Addendum 1) | One spot (26-connectivity), matching how GT lesions are counted |
+| No ET predicted at all (Addendum 1) | No spots, empty review outputs; scorecard counts GT lesions as missed |
+| Agreement unavailable (no source masks) (Addendum 1) | `agreement = None`; never triggers `models_disagree` |
+| A spot exactly at a threshold (Addendum 1) | Kept (all cuts are strict `<` for review) |
 ## 7. Done Checklist
 
 - [x] Req 1: `RStarConfig` defaults and validation errors
@@ -136,3 +160,10 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [x] Req 19: import hygiene
 - [x] Req 20: README content
 - [x] Req 21: regression test reproduces the reference scores (when data and checkpoints are available)
+- [ ] Req 22: spot extraction (26-connectivity), features and agreement exact; empty volume; shape mismatch raises
+- [ ] Req 23: keep/review and reasons exact with pinned boundaries and priority; `None` agreement never disagrees; invalid thresholds raise
+- [ ] Req 24: review mask and spot list in the issue #44 format, renumbered, JSON-serialisable
+- [ ] Req 25: per-spot and per-lesion counts, silent errors and both Dice values exact on a hand-built patient; empty patient
+- [ ] Req 26: today's rule as decisions matches `fusion.apply_small_et_rule` scoring below, at and above threshold
+- [ ] Req 27: dtype tolerance, invalid probabilities and mismatched masks rejected, edge spots, determinism
+- [ ] Req 28: only the new module, its tests and SPEC.md change; pipeline does not import it; existing tests pass unedited

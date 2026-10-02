@@ -15,6 +15,7 @@ import math
 
 import torch
 import torch.nn as nn
+from monai.losses import DiceCELoss
 
 NUM_CLASSES = 5
 REGION_NAMES = ("WT", "TC", "ET")  # channel order of every (B, 3, ...) tensor in this module
@@ -57,11 +58,18 @@ class RegionDiceBCELoss(nn.Module):
     the logits, and everything runs in float32 whatever the logit dtype, so it is safe under AMP.
     """
 
-    def __init__(self, smooth: float = 1.0) -> None:
+    def __init__(self, smooth: float = 1.0, terms: str = "both", et_pos_weight: float = 1.0) -> None:
         super().__init__()
         if isinstance(smooth, bool) or not isinstance(smooth, (int, float)) or not math.isfinite(smooth) or smooth <= 0:
             raise ValueError(f"smooth must be a positive finite number, got {smooth!r}")
+        if terms not in ("both", "dice", "bce"):  # Addendum 7: train one half alone, as a diagnostic
+            raise ValueError(f"terms must be 'both', 'dice' or 'bce', got {terms!r}")
+        if (isinstance(et_pos_weight, bool) or not isinstance(et_pos_weight, (int, float))
+                or not math.isfinite(et_pos_weight) or et_pos_weight <= 0):
+            raise ValueError(f"et_pos_weight must be a positive finite number, got {et_pos_weight!r}")
         self.smooth = float(smooth)
+        self.terms = terms
+        self.et_pos_weight = float(et_pos_weight)  # Addendum 8: weight on POSITIVE voxels of the ET BCE term only
 
     def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         lg = logits.float()
@@ -84,5 +92,31 @@ class RegionDiceBCELoss(nn.Module):
 
         dims = (0,) + tuple(range(2, lg.ndim))  # everything except the region channel
         dice = 1.0 - (2.0 * (prob * target).sum(dims) + self.smooth) / (prob.sum(dims) + target.sum(dims) + self.smooth)
-        bce = -(target * log_p + (1.0 - target) * log_q).mean(dims)
+        pos_weight = torch.ones(3, dtype=lg.dtype, device=lg.device)
+        pos_weight[2] = self.et_pos_weight                    # channel order (WT, TC, ET)
+        pos_weight = pos_weight.view(1, 3, *([1] * (lg.ndim - 2)))
+        bce = -(pos_weight * target * log_p + (1.0 - target) * log_q).mean(dims)
+        if self.terms == "dice":
+            return dice.mean()
+        if self.terms == "bce":
+            return bce.mean()
         return (dice + bce).mean()
+
+
+class RegionHybridLoss(nn.Module):
+    """Region loss + the existing per-label Dice-CE, equal weights (SPEC.md Addendum 6).
+
+    The first real run of RegionDiceBCELoss alone (2026-10-01) cut false ET but under-segmented real
+    enhancing tumour (about two-thirds of the true volume). The per-label term keeps direct per-class
+    pressure on label 1 and supervises the label 2 vs label 3 split the region term cannot see.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.region = RegionDiceBCELoss()
+        self.per_label = DiceCELoss(to_onehot_y=True, softmax=True, include_background=True)  # = _build_loss("dice_ce")
+
+    def forward(self, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        region_term = self.region(logits, y)                    # validates the label values first
+        y5 = y if (y.ndim == 5 and y.shape[1] == 1) else y.unsqueeze(1)
+        return region_term + self.per_label(logits.float(), y5).float()
