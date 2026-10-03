@@ -11,6 +11,7 @@ import pandas as pd
 # ──────────────────────────────────────────────────────────
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "roc_cache.json"
 MODEL_METRICS_PATH = Path(__file__).resolve().parents[1] / "data" / "model_metrics.json"   # utils/build_model_metrics.py
+FLAG_STUDY_PATH = Path(__file__).resolve().parents[1] / "data" / "review_flag_study.json"
 
 @st.cache_data
 def load_metrics():
@@ -179,6 +180,45 @@ if model_metrics:
     st.caption("Table: voxels of all patients in the set pooled together. Sensitivity = share of the real tumour the "
                "model found; precision = share of what it marked that is really tumour. Specificity is left out: "
                "background is almost the whole scan, so it is about 0.999 for every model and tells them apart by nothing.")
+
+    try:
+        flag_study = json.loads(FLAG_STUDY_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        flag_study = None
+    if flag_study:
+        st.divider()
+        st.markdown('<div class="section-title">🟣 Enhancing tumour: silent errors with review flags</div>',
+                    unsafe_allow_html=True)
+        st.markdown('<div class="section-subtitle">A silent error is a mistake nobody is told about. Today R* deletes '
+                    "all enhancing tumour when a patient's total is small. With review flags, uncertain spots are "
+                    'shown as "please review" instead (magenta on the Model Comparison page).</div>',
+                    unsafe_allow_html=True)
+        fs = flag_study["sets"]["fresh30"]; t, w = fs["today"], fs["with_flags"]
+        st.markdown(f"""
+<div class="stat-grid" style="grid-template-columns: repeat(3,1fr);">
+    <div class="stat-card">
+        <div class="stat-label">Silent false alarms</div>
+        <div class="stat-value">{t['silent_false']} → {w['silent_false']}</div>
+        <div class="stat-delta">fresh-30, today → with flags</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Silently missed lesions</div>
+        <div class="stat-value">{t['silent_missed']} → {w['silent_missed']}</div>
+        <div class="stat-delta" style="color:#64748B;">of {fs['lesions']} expert lesions</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Spots to review</div>
+        <div class="stat-value">{w['review_load']:.1f}</div>
+        <div class="stat-delta" style="color:#64748B;">per patient ({w['flags_real']} real, {w['flags_false']} not)</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+        ho = flag_study["sets"]["heldout"]
+        st.caption(f"Rule: {flag_study['rule']} Held-out (81 patients, where the rule was chosen): silent false alarms "
+                   f"{ho['today']['silent_false']} → {ho['with_flags']['silent_false']}, silently missed lesions "
+                   f"{ho['today']['silent_missed']} → {ho['with_flags']['silent_missed']} of {ho['lesions']}. "
+                   "Flags remove silent false alarms; most missed lesions are never predicted by any model, so "
+                   "flags cannot recover them.")
     st.divider()
 
 if not metrics_data:

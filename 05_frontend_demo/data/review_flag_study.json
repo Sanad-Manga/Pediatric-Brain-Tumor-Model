@@ -1,0 +1,17 @@
+{
+  "_source": "neuropeds_overnight/PREREGISTERED_review_flags_2026-10-02.md, flags_eval.py -> RESULTS_flags.txt. Rule chosen on held-out, fresh-30 scored once.",
+  "rule": "Flag for review every enhancing-tumour spot of at least 50 voxels whose mean enhancing-tumour probability is below 0.7 (instead of deleting all enhancing tumour when a patient's total is under 500 mm3).",
+  "definitions": {
+    "silent_false": "enhancing spots shown as tumour that the expert did not mark, with no flag",
+    "silent_missed": "expert enhancing lesions (>= 50 voxels) that are neither shown nor flagged",
+    "review_load": "flagged spots per patient"
+  },
+  "sets": {
+    "fresh30": {"label": "Fresh-30 (clean test)", "lesions": 21,
+                "today": {"silent_false": 3, "silent_missed": 4, "review_load": 0.0},
+                "with_flags": {"silent_false": 0, "silent_missed": 3, "review_load": 0.53, "flags_real": 9, "flags_false": 7}},
+    "heldout": {"label": "Held-out (81)", "lesions": 94,
+                "today": {"silent_false": 5, "silent_missed": 49, "review_load": 0.0},
+                "with_flags": {"silent_false": 0, "silent_missed": 47, "review_load": 0.42, "flags_real": 20, "flags_false": 14}}
+  }
+}
