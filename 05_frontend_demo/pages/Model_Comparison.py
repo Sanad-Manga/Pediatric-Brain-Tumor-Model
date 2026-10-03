@@ -90,7 +90,13 @@ def load_patient_data(patient_id):
         with open(spots_path, "r") as f:
             review_spots = json.load(f)
             
-    return meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots
+    # ─── 🌟 Bonus: Load Hi-Res R* if available (Issue #53) ───
+    lbl_rstar_hires = None
+    hires_path = patient_dir / "labels_rstar_hires.npz"
+    if hires_path.exists():
+        lbl_rstar_hires = np.load(hires_path)["labels"]
+            
+    return meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots, lbl_rstar_hires
 
 def get_background_slice(patient_id, slice_idx):
     bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx:03d}.npz"
@@ -160,7 +166,7 @@ def main():
     selected_patient = st.selectbox("Select Patient Record", patients)
     
     if selected_patient:
-        meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots = load_patient_data(selected_patient)
+        meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots, lbl_rstar_hires = load_patient_data(selected_patient)
         
         status = meta.get("rstar_status", "unknown")
         warnings = meta.get("rstar_warnings", [])
@@ -174,6 +180,7 @@ def main():
         # ─── DYNAMIC SLICE RANGE CALCULATION ───
         max_slice = lbl_rstar.shape[2] - 1
         has_review = len(review_spots) > 0
+        has_hires = lbl_rstar_hires is not None
         
         demo_axial_dir = DEMO_CACHE / selected_patient / "axial"
         avail_bg_slices = []
@@ -192,31 +199,44 @@ def main():
         else:
             default_slice = max_slice // 2
             bg_caption = "ℹ️ Background MRI unavailable for this demo record. Slices display on a black canvas."
-        # ───────────────────────────────────────
-        
-        if has_review:
-            col_slider, col_toggle1, col_toggle2 = st.columns([2, 1, 1])
-        else:
-            col_slider, col_toggle1 = st.columns([3, 1])
             
-        with col_slider:
+        # ─── DYNAMIC CONTROL PANEL LAYOUT ───
+        layout = [2.5, 1]
+        if has_review: layout.append(1)
+        if has_hires: layout.append(1.2) # Give hi-res toggle a slightly wider column
+        
+        cols = st.columns(layout)
+        
+        with cols[0]:
             slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, default_slice)
             st.caption(bg_caption)
             
-        with col_toggle1:
+        with cols[1]:
             st.write("") 
             show_mask = st.toggle("Overlay Segmentation", value=True)
             
+        idx = 2
         show_review = False
         if has_review:
-            with col_toggle2:
+            with cols[idx]:
                 st.write("")
-                show_review = st.toggle("🟣 Show Flagged Spots", value=True)
+                show_review = st.toggle("🟣 Flagged Spots", value=True)
+            idx += 1
             
+        use_hires = False
+        if has_hires:
+            with cols[idx]:
+                st.write("")
+                use_hires = st.toggle("✨ Hi-Res Mode", value=False)
+                
         bg_img = get_background_slice(selected_patient, slice_idx)
             
         img_col1, img_col2, img_col3 = st.columns(3)
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
+        
+        # Decide which R* label mask to display
+        active_rstar_lbl = lbl_rstar_hires if use_hires else lbl_rstar
+        rstar_title = "R* (Hi-Res)" if use_hires else "R* (Fusion)"
         
         with img_col1:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
@@ -225,8 +245,8 @@ def main():
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D Architecture</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
         with img_col3:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>R* (Fusion)</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_plotly_viewer(bg_img, lbl_rstar[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
+            st.markdown(f"<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>{rstar_title}</h4>", unsafe_allow_html=True)
+            st.plotly_chart(create_plotly_viewer(bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
 
         if has_review:
             st.markdown(f"""
@@ -261,12 +281,24 @@ def main():
         st.divider()
         
         st.markdown("<h3 style='font-family: Outfit, sans-serif; color: #0F172A;'>📊 Multi-Model Performance Comparison</h3>", unsafe_allow_html=True)
-        st.caption("Dice similarity coefficient per region across all architectures.")
+        
+        # Display the research note if Hi-Res is active
+        if use_hires and "rstar_hires_note" in meta:
+            st.caption(f"🔬 **Research Option Active:** {meta['rstar_hires_note']}")
+        else:
+            st.caption("Dice similarity coefficient per region across all architectures.")
         
         regions = ["ET", "NC", "WT"]
         metrics_2d = meta.get("regions", {}).get("2d", {})
         metrics_3d = meta.get("regions", {}).get("3d", {})
-        metrics_rstar = meta.get("regions", {}).get("rstar", {})
+        
+        # Choose which metrics to display in the 3rd column
+        if use_hires:
+            metrics_rstar = meta.get("regions", {}).get("rstar_hires", {})
+            col_3_title = "<b style='color:#0EA5E9;'>R* (Hi-Res)</b>"
+        else:
+            metrics_rstar = meta.get("regions", {}).get("rstar", {})
+            col_3_title = "<b style='color:#0EA5E9;'>R* Fusion</b>"
         
         met_col1, met_col2, met_col3 = st.columns(3)
         
@@ -283,7 +315,7 @@ def main():
                 st.metric(label=f"{r} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
                 
         with met_col3:
-            st.markdown("<b style='color:#0EA5E9;'>R* Fusion</b>", unsafe_allow_html=True)
+            st.markdown(col_3_title, unsafe_allow_html=True)
             for r in regions:
                 val_rstar = metrics_rstar.get(r, {}).get("dice", "N/A")
                 val_2d = metrics_2d.get(r, {}).get("dice", 0.0)
