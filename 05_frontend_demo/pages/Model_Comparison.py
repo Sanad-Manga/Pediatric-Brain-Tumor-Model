@@ -23,7 +23,7 @@ st.markdown("""
     box-shadow: 0 4px 20px rgba(0,0,0,0.02);
 }
 .page-title {
-    font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; font-family: 'Outfit', sans-serif;
+    font-size: 2.2rem; font-weight: 800; letter-spacing: -0.02em; font-family: 'Outfit', sans-serif;
     color: #0F172A; margin-bottom: 8px;
 }
 .page-sub { color: #475569; font-size: 0.95rem; line-height: 1.6; }
@@ -94,21 +94,32 @@ def load_patient_data(patient_id):
     return meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots
 
 def get_background_slice(patient_id, slice_idx):
-    bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx}.npz"
+    bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx:03d}.npz"
     if bg_path.exists():
-        data = np.load(bg_path)
-        return data["t1c"] if "t1c" in data else data[data.files[0]]
+        img_arr = np.load(bg_path)["image"][0]
+        # Force a memory copy after rotation so Plotly can render it properly
+        return np.rot90(img_arr, 2).copy()
     return None
 
 def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False):
     """Generate an interactive Plotly visualization for MRI, segmentation, and review flags."""
     fig = go.Figure()
     
+    # ─── FIX: Force contiguous memory arrays after transpose ───
+    if bg_img is not None:
+        bg_img = np.ascontiguousarray(bg_img.T.copy())
+    
+    mask_img = np.ascontiguousarray(mask_img.T.copy())
+    
+    if review_img is not None:
+        review_img = np.ascontiguousarray(review_img.T.copy())
+
     # Render MRI Background
     if bg_img is not None:
         fig.add_trace(go.Heatmap(z=bg_img, colorscale='gray', showscale=False, hoverinfo='skip'))
     else:
-        fig.add_trace(go.Heatmap(z=np.zeros_like(mask_img), colorscale='gray', showscale=False, hoverinfo='skip'))
+        # Set zmin=0, zmax=1 to force a black background instead of gray
+        fig.add_trace(go.Heatmap(z=np.zeros_like(mask_img), colorscale='gray', zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
         
     # Render Base Segmentation Overlay
     if show_mask:
@@ -180,6 +191,7 @@ def main():
             
         with col_slider:
             slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, max_slice // 2)
+            st.caption("ℹ️ Background MRI available for slices 29-109 on select demo patients (e.g. 00021, 00051). Other slices display on a black canvas.")
             
         with col_toggle1:
             st.write("") 
@@ -192,14 +204,11 @@ def main():
                 show_review = st.toggle("🟣 Show Flagged Spots", value=True)
             
         bg_img = get_background_slice(selected_patient, slice_idx)
-        if bg_img is None:
-            st.info("ℹ️ Original MRI sequence unavailable for this record. Displaying masks on dark background.")
             
         # Interactive Viewers
         img_col1, img_col2, img_col3 = st.columns(3)
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
-        # NOTE: Added unique 'key' arguments to fix the StreamlitDuplicateElementId Error
         with img_col1:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
@@ -272,7 +281,6 @@ def main():
                 val_rstar = metrics_rstar.get(r, {}).get("dice", "N/A")
                 val_2d = metrics_2d.get(r, {}).get("dice", 0.0)
                 
-                # Show value, but keep the nice delta comparison against 2D!
                 if isinstance(val_rstar, float) and isinstance(val_2d, float):
                     st.metric(label=f"{r} Dice", value=f"{val_rstar:.4f}", delta=f"{(val_rstar - val_2d):.4f} vs 2D")
                 else:
