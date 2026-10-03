@@ -13,6 +13,7 @@ Regions: ET = label 1, TC = labels 1-3, WT = labels 1-4.
 Two summaries per test set:
   per_patient_mean_dice : mean over patients of the (ET+TC+WT)/3 Dice (empty prediction of an empty region = 1)
   pooled                : Dice / sensitivity / precision over all voxels of all patients pooled together
+  per_patient           : each patient's (ET+TC+WT)/3 Dice for the three models
 Test sets: fresh-30 (never used for any choice; the clean test) and held-out 81 (some R* settings were tuned on it).
 """
 from __future__ import annotations
@@ -58,7 +59,7 @@ def _patient(args):
         "3d": fusion.apply_small_et_rule(fusion.argmax_labels(p3), 500.0, 1.0)[0],
         "rstar": fusion.apply_small_et_rule(fusion.fuse(p2, p3, 0.5, 0.5), 500.0, 1.0)[0],
     }
-    out = {}
+    out = {"sid": sid}
     for model, lab in labels.items():
         for region, cls in REGIONS.items():
             p, t = np.isin(lab, cls), np.isin(truth, cls)
@@ -76,7 +77,7 @@ def main() -> int:
         for set_name, (d2, _) in SETS.items():
             ids = sorted(p.stem for p in d2.glob("*.npy"))
             rows = list(ex.map(_patient, [(set_name, i) for i in ids]))
-            entry = {"n_patients": len(ids), "models": {}}
+            entry = {"n_patients": len(ids), "models": {}, "per_patient": []}
             for model in ("2d", "3d", "rstar"):
                 per_patient = [np.mean([_dice(*r[(model, reg)]) for reg in REGIONS]) for r in rows]
                 pooled = {}
@@ -85,6 +86,9 @@ def main() -> int:
                     pooled[reg] = {"dice": round(_dice(tp, fp, fn), 4), "sensitivity": round(tp / (tp + fn), 4),
                                    "precision": round(tp / (tp + fp), 4)}
                 entry["models"][model] = {"per_patient_mean_dice": round(float(np.mean(per_patient)), 4), "pooled": pooled}
+            for r in rows:                                   # per-patient mean Dice, for the Dashboard's dot chart
+                entry["per_patient"].append({"patient": r["sid"], **{
+                    m: round(float(np.mean([_dice(*r[(m, reg)]) for reg in REGIONS])), 4) for m in ("2d", "3d", "rstar")}})
             result["sets"][set_name] = entry
             print(set_name, {m: entry["models"][m]["per_patient_mean_dice"] for m in entry["models"]}, flush=True)
     OUT.write_text(json.dumps(result, indent=2), encoding="utf-8")

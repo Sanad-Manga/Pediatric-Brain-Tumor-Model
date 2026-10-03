@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
 # ──────────────────────────────────────────────────────────
 #  CONFIG & LOAD DATA
@@ -177,6 +178,37 @@ if model_metrics:
             rows.append({"Region": region_names[reg], "Model": MODEL_NAMES[key], "Dice": f"{m['dice']:.3f}",
                          "Sensitivity": f"{m['sensitivity']:.3f}", "Precision": f"{m['precision']:.3f}"})
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    pp = chosen.get("per_patient", [])
+    if pp:
+        x2d = [r["2d"] for r in pp]; yr = [r["rstar"] for r in pp]
+        gains = [y - x for x, y in zip(x2d, yr)]
+        weak = [g for x, g in zip(x2d, gains) if x < 0.6]
+        fig_pp = go.Figure()
+        fig_pp.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(color="#94A3B8", dash="dash", width=1),
+                                    showlegend=False, hoverinfo="skip"))
+        fig_pp.add_trace(go.Scatter(x=x2d, y=yr, mode="markers", showlegend=False,
+                                    marker=dict(size=9, color=["#0EA5E9" if g >= 0 else "#F97316" for g in gains],
+                                                line=dict(color="#FFFFFF", width=1)),
+                                    text=[r["patient"] for r in pp],
+                                    hovertemplate="%{text}<br>2D %{x:.3f} → R* %{y:.3f}<extra></extra>"))
+        fig_pp.update_layout(xaxis=dict(title="2D model: mean Dice per patient", range=[0, 1.02]),
+                             yaxis=dict(title="R*: mean Dice per patient", range=[0, 1.02], scaleanchor="x"),
+                             height=420, margin=dict(t=10, b=40, l=50, r=10),
+                             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        col_pp, col_pp_text = st.columns([1.2, 1])
+        with col_pp:
+            st.plotly_chart(fig_pp, use_container_width=True, config={"displayModeBar": False})
+        with col_pp_text:
+            st.markdown("**Each dot is one patient.** Above the dashed line, R* beats the 2D model; below it, "
+                        "the 2D model alone was better.")
+            st.markdown(f"- R* is better for **{sum(g > 0 for g in gains)} of {len(gains)}** patients, by "
+                        f"{np.mean([g for g in gains if g > 0]):.2f} on average; where it is worse, by "
+                        f"{-np.mean([g for g in gains if g < 0]):.2f} on average (at most {-min(gains):.2f}).")
+            if weak:
+                st.markdown(f"- Where the 2D model struggles (below 0.6, {len(weak)} patients), R* adds "
+                            f"**{np.mean(weak):+.2f}** on average: the 3D models rescue the cases the 2D model misses.")
+            st.markdown("- Where the 2D model is already good, R* changes little.")
+
     st.caption("Table: voxels of all patients in the set pooled together. Sensitivity = share of the real tumour the "
                "model found; precision = share of what it marked that is really tumour. Specificity is left out: "
                "background is almost the whole scan, so it is about 0.999 for every model and tells them apart by nothing.")
