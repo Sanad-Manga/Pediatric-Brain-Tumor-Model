@@ -26,9 +26,9 @@ from rstar.review_flags import Decision, decide, find_et_spots, review_outputs  
 PATIENTS_FROM = REPO / "05_frontend_demo" / "comparison_cache"
 RAW = Path(r"D:\NeuroPeds AI\PKG - BraTS-PEDs-v1\BraTS-PEDs-v1\Training")
 PROBS_2D = Path(r"D:\NeuroPeds AI\probs2d_heldout")
-SAVED_3D = Path(r"C:\Users\ahmed\AppData\Local\Temp\claude\C--Users-ahmed\1099fabd-13c1-4247-845e-223d5116695f\scratchpad")
-FAMILY_3D = SAVED_3D / "probs3d"                                    # deployed 4-member family, flip-TTA, 96^3
-MEMBERS_3D = [SAVED_3D / f"probs3d_mem_old{m}_heldout" for m in "ACDE"]
+SAVED_3D = Path(r"D:\NeuroPeds AI\probs3d_deployed")                 # regenerated 3 Oct (the Temp copies were deleted)
+FAMILY_3D = SAVED_3D / "family_heldout"                              # deployed 4-member family, flip-TTA, 96^3
+MEMBERS_3D = [SAVED_3D / f"mem{m}_heldout" for m in "ACDE"]
 SPECK_VOXELS = 50
 PROB_CUT = 0.7
 SHAPE = (240, 240, 155)
