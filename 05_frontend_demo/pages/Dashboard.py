@@ -1,298 +1,278 @@
 import streamlit as st
 import time
 from datetime import datetime
+import json
+from pathlib import Path
+import plotly.graph_objects as go
+import pandas as pd
 
-from components.theme import apply_custom_theme
-from utils.loaders import load_metrics_cache
+# ──────────────────────────────────────────────────────────
+#  CONFIG & LOAD DATA
+# ──────────────────────────────────────────────────────────
+DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "roc_cache.json"
 
-apply_custom_theme()
+@st.cache_data
+def load_metrics():
+    try:
+        with open(DATA_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+metrics_data = load_metrics()
+
+if metrics_data:
+    epoch_val = metrics_data.get("checkpoint", {}).get("epochs_completed", 0)
+    subjects = metrics_data.get("n_subjects", 82)
+    mean_dice = metrics_data.get("checkpoint", {}).get("best_mean_dice", 0.0)
+    wt_hd95 = metrics_data["regions"]["WT"]["hd95_median_mm"]
+else:
+    epoch_val = 0; subjects = 0; mean_dice = 0.0; wt_hd95 = 0.0
 
 # ──────────────────────────────────────────────────────────
 #  PAGE-LEVEL CSS
 # ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── HERO ── */
 .hero-wrap {
     background: linear-gradient(135deg, #FFFFFF 0%, #F0F9FF 60%, #E0F2FE 100%);
-    border: 1px solid rgba(2, 132, 199, 0.15);
+    border: 1px solid rgba(14, 165, 233, 0.15);
     border-radius: 20px;
-    padding: 48px 44px;
-    position: relative;
-    overflow: hidden;
+    padding: 40px 44px;
     margin-bottom: 32px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
 }
 .hero-label {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 6px 16px;
-    background: rgba(2, 132, 199, 0.08);
-    border: 1px solid rgba(2, 132, 199, 0.2);
+    background: rgba(14, 165, 233, 0.08);
+    border: 1px solid rgba(14, 165, 233, 0.2);
     border-radius: 99px;
     font-size: 0.75rem;
-    font-weight: 600;
-    color: #0284C7;
-    letter-spacing: 0.05em;
+    font-weight: 700;
+    color: #0EA5E9;
     text-transform: uppercase;
     margin-bottom: 20px;
 }
 .hero-live-dot {
     width: 8px; height: 8px; border-radius: 50%;
-    background: #059669;
+    background: #10B981;
     animation: pulseDot 2s infinite;
 }
+@keyframes pulseDot {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
 .hero-title {
-    font-size: clamp(2rem, 4vw, 3rem);
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    font-weight: 800;
     color: #0F172A;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     font-family: 'Outfit', sans-serif;
+    letter-spacing: -0.02em;
 }
-.hero-sub {
-    color: #475569;
-    font-size: 1.05rem;
-    font-weight: 400;
-    max-width: 650px;
-    line-height: 1.6;
-    margin-bottom: 30px;
-}
-.hero-tags { display: flex; flex-wrap: wrap; gap: 10px; }
-.hero-tag {
-    padding: 6px 14px;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    background: #FFFFFF;
-    border: 1px solid #E2E8F0;
-    color: #334155;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-}
+.hero-sub { color: #475569; font-size: 1.05rem; max-width: 700px; margin-bottom: 24px; }
 
-/* ── STAT CARDS ── */
 .stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 40px; }
 .stat-card {
     background: #FFFFFF;
     border: 1px solid #E2E8F0;
     border-radius: 16px;
-    padding: 24px 20px;
-    position: relative;
-    overflow: hidden;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    padding: 24px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    transition: transform 0.2s;
 }
-.stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(2, 132, 199, 0.08);
-    border-color: rgba(2, 132, 199, 0.3);
-}
+.stat-card:hover { transform: translateY(-4px); border-color: #0EA5E9; box-shadow: 0 8px 20px rgba(14, 165, 233, 0.08); }
 .stat-icon { font-size: 1.8rem; margin-bottom: 12px; }
-.stat-label { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748B; margin-bottom: 8px; }
-.stat-value { font-size: 2rem; font-weight: 700; line-height: 1; letter-spacing: -0.02em; color: #0F172A; margin-bottom: 8px; }
-.stat-delta { font-size: 0.8rem; font-weight: 500; color: #059669; }
+.stat-label { font-size: 0.8rem; font-weight: 600; color: #64748B; text-transform: uppercase; margin-bottom: 8px; }
+.stat-value { font-size: 2.2rem; font-weight: 700; color: #0F172A; margin-bottom: 4px; font-family: 'Outfit', sans-serif;}
+.stat-delta { font-size: 0.8rem; font-weight: 600; color: #10B981; }
 
-/* ── SECTION HEADINGS ── */
-.section-heading {
-    display: flex; align-items: center; gap: 14px;
-    margin-bottom: 24px;
-}
-.section-heading-icon {
-    width: 38px; height: 38px;
-    background: rgba(2, 132, 199, 0.08);
-    border: 1px solid rgba(2, 132, 199, 0.2);
-    border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.2rem;
-}
-.section-heading-text { font-size: 1.2rem; font-weight: 700; color: #0F172A; font-family: 'Outfit', sans-serif;}
-.section-heading-sub  { font-size: 0.85rem; color: #64748B; margin-top: 2px; }
-
-/* ── MODULE CARDS ── */
-.mod-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 40px; }
-.mod-card {
-    background: #FFFFFF;
-    border: 1px solid #E2E8F0;
-    border-radius: 16px;
-    padding: 26px;
-    transition: all 0.2s ease;
-    cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
-}
-.mod-card:hover { transform: translateY(-3px); border-color: #0284C7; box-shadow:0 10px 25px rgba(2, 132, 199, 0.1); }
-.mod-card-top { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
-.mod-card-icon {
-    width:46px; height:46px; border-radius:12px;
-    display:flex; align-items:center; justify-content:center; font-size:1.4rem;
-    flex-shrink:0;
-    background: rgba(2, 132, 199, 0.08); border: 1px solid rgba(2, 132, 199, 0.2);
-}
-.mod-card-name { font-size:1.05rem; font-weight:700; color:#0F172A; font-family: 'Outfit', sans-serif;}
-.mod-card-nav  { font-size:0.75rem; color:#64748B; margin-top:2px; font-weight: 500;}
-.mod-card-desc { font-size:0.9rem; color:#475569; line-height:1.6; margin-bottom:16px; }
-
-/* ── DATA TABLE ── */
-.data-section { display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-bottom:40px; }
-.data-panel {
-    background:#FFFFFF;
-    border:1px solid #E2E8F0;
-    border-radius:16px; padding:24px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
-}
-
-/* ── FOOTER ── */
-.dash-footer {
-    text-align:center;
-    padding:24px;
-    font-size:0.8rem;
-    color:#94A3B8;
-    border-top:1px solid #E2E8F0;
-    letter-spacing:0.02em;
-    font-weight: 500;
-}
-
-@media (max-width: 900px) {
-    .stat-grid, .mod-grid { grid-template-columns:1fr; }
-    .data-section { grid-template-columns:1fr; }
-}
+.section-title { font-family: 'Outfit', sans-serif; font-size: 1.5rem; font-weight: 700; color: #0F172A; margin-bottom: 8px; }
+.section-subtitle { font-size: 0.95rem; color: #64748B; margin-bottom: 24px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────
-#  HERO
+#  HERO SECTION
 # ──────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero-wrap">
     <div class="hero-label">
-        <span class="hero-live-dot"></span>
-        Clinical Dashboard
+        <span class="hero-live-dot"></span> Clinical Dashboard
     </div>
-    <div class="hero-title">Pediatric Brain Tumor<br>Clinical Decision Support</div>
+    <div class="hero-title">Pediatric Brain Tumor<br>Performance Analytics</div>
     <div class="hero-sub">
-        Segmentation of pediatric brain tumors on multi-modal MRI, scored on held-out patients from BraTS-PEDs 2024. A research demo &mdash; not a clinical tool.
-    </div>
-    <div class="hero-tags">
-        <span class="hero-tag">🧪 Research demo</span>
-        <span class="hero-tag">🩻 2D U-Net ensemble</span>
-        <span class="hero-tag">🧠 Multi-modal MRI</span>
-        <span class="hero-tag">📁 .npz slice upload</span>
+        Interactive visualization of the R* model ensemble performance evaluated on held-out BraTS-PEDs 2024 subjects. Data is bound dynamically to the validation cache.
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────
-#  STAT CARDS
+#  DYNAMIC STAT CARDS
 # ──────────────────────────────────────────────────────────
-st.markdown("""
+if not metrics_data:
+    st.error("⚠ Metrics cache (`roc_cache.json`) is missing.")
+    st.stop()
+
+st.markdown(f"""
 <div class="stat-grid">
     <div class="stat-card">
-        <div class="stat-icon">✅</div>
-        <div class="stat-label">System Status</div>
-        <div class="stat-value">Online</div>
-        <div class="stat-delta">Demo app running</div>
+        <div class="stat-icon">👥</div>
+        <div class="stat-label">Evaluated Subjects</div>
+        <div class="stat-value">{subjects}</div>
+        <div class="stat-delta">Held-out cohort</div>
     </div>
     <div class="stat-card">
-        <div class="stat-icon">🗂</div>
-        <div class="stat-label">Held-out Patients</div>
-        <div class="stat-value">82</div>
-        <div class="stat-delta">Never used for training</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-icon">⏱</div>
-        <div class="stat-label">Model</div>
-        <div class="stat-value">U-Net ensemble</div>
-        <div class="stat-delta" style="color: #0284C7">2D · widths 16 + 64</div>
+        <div class="stat-icon">⚙️</div>
+        <div class="stat-label">Training State</div>
+        <div class="stat-value">Ep {epoch_val}</div>
+        <div class="stat-delta" style="color: #0EA5E9;">2D Ensemble</div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">🎯</div>
-        <div class="stat-label">Held-out Mean Dice</div>
-        <div class="stat-value">0.754</div>
-        <div class="stat-delta" style="color: #0284C7">ET · NC · WT, axial + coronal</div>
+        <div class="stat-label">Global Mean Dice</div>
+        <div class="stat-value">{mean_dice:.3f}</div>
+        <div class="stat-delta">ET, TC, WT Average</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📏</div>
+        <div class="stat-label">WT Median HD95</div>
+        <div class="stat-value">{wt_hd95:.2f} <span style="font-size:1rem;">mm</span></div>
+        <div class="stat-delta" style="color: #64748B;">Lower is better</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────
-#  PLATFORM MODULES
+#  INTERACTIVE CHARTS (PLOTLY)
 # ──────────────────────────────────────────────────────────
-st.markdown("""
-<div class="section-heading">
-    <div class="section-heading-icon">🧩</div>
-    <div>
-        <div class="section-heading-text">Clinical Modules</div>
-        <div class="section-heading-sub">Tools for analysis, reporting, and explainability</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="section-title">📊 Regional Segmentation Profiling</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-subtitle">Comparing model precision, sensitivity, and surface distance across tumor sub-regions.</div>', unsafe_allow_html=True)
 
-def mod_card(icon, name, nav, desc):
-    return f"""
-    <div class="mod-card" style="height:100%;">
-        <div class="mod-card-top">
-            <div class="mod-card-icon">{icon}</div>
-            <div>
-                <div class="mod-card-name">{name}</div>
-                <div class="mod-card-nav">{nav}</div>
-            </div>
-        </div>
-        <div class="mod-card-desc">{desc}</div>
-    </div>"""
+col_radar, col_bar = st.columns([1.2, 1])
+regions_data = metrics_data["regions"]
 
-col1, col2, col3 = st.columns(3, gap="medium")
-with col1:
-    st.markdown(mod_card("🧠", "MRI Analysis Studio", "Clinical & Analysis →", 
-        "Upload multi-modal MRI slices (.npz). Inspect them in an interactive 2D viewer with segmentation overlays rendered per-class."), unsafe_allow_html=True)
-with col2:
-    st.markdown(mod_card("📄", "Segmentation Report", "Clinical & Analysis →", 
-        "Patient summary with tumor statistics, region-level interpretation, and one-click PDF export (research use only)."), unsafe_allow_html=True)
-with col3:
-    st.markdown(mod_card("🩺", "Tumor Subregion Guide", "Reference →", 
-        "Reference for the four BraTS-PEDs tumor subregions and the MRI modalities the model reads. Explainability maps are not implemented in this demo."), unsafe_allow_html=True)
+with col_radar:
+    categories = ['Dice Score', 'Sensitivity', 'Precision (Est.)']
+    fig_radar = go.Figure()
+    
+    colors = {'ET': '#EF4444', 'TC': '#3B82F6', 'WT': '#10B981'}
+    names = {'ET': 'Enhancing (ET)', 'TC': 'Core (TC)', 'WT': 'Whole (WT)'}
+    
+    for reg, color in colors.items():
+        r_data = [
+            regions_data[reg].get("dice", 0),
+            regions_data[reg].get("sensitivity", 0),
+            regions_data[reg].get("precision", 0)
+        ]
+        fig_radar.add_trace(go.Scatterpolar(
+            r=r_data, theta=categories, fill='toself', name=names[reg], marker_color=color
+        ))
 
-st.markdown("<div style='margin-bottom:20px'></div>", unsafe_allow_html=True)
+    fig_radar.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+        showlegend=True, title="Model Accuracy Radar",
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        height=380, margin=dict(t=40, b=20, l=20, r=20)
+    )
+    st.plotly_chart(fig_radar, use_container_width=True, config={'displayModeBar': False})
+
+with col_bar:
+    fig_bar = go.Figure()
+    hd95_vals = [regions_data[reg]["hd95_median_mm"] for reg in ['ET', 'TC', 'WT']]
+    
+    fig_bar.add_trace(go.Bar(
+        x=list(names.values()), y=hd95_vals, 
+        marker_color=list(colors.values()),
+        text=[f"{v:.1f} mm" for v in hd95_vals], textposition='auto'
+    ))
+    fig_bar.update_layout(
+        title="Hausdorff Distance (HD95)",
+        yaxis_title="Millimeters (mm)",
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        height=380, margin=dict(t=40, b=20, l=20, r=20)
+    )
+    st.plotly_chart(fig_bar, use_container_width=True, config={'displayModeBar': False})
+
+st.divider()
 
 # ──────────────────────────────────────────────────────────
-#  DATASET + RECENT CASES  (2-column)
+#  ADVANCED ANALYTICS (ROC & TABLE)
 # ──────────────────────────────────────────────────────────
-st.markdown("""
-<div class="section-heading">
-    <div class="section-heading-icon">📚</div>
-    <div>
-        <div class="section-heading-text">Dataset & Recent Cases</div>
-        <div class="section-heading-sub">Recent pediatric patient cases and reference dataset details</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="section-title">📈 Clinical Validation Metrics</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-subtitle">Receiver Operating Characteristic (ROC) curves and detailed statistical summary.</div>', unsafe_allow_html=True)
 
-st.markdown("""
-    <div class="data-panel">
-        <div style="font-size:0.8rem; font-weight: 600; text-transform:uppercase; letter-spacing:0.05em; color:#64748B; margin-bottom:18px;">Reference Dataset Summary</div>
-        <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
-            <tr style="border-bottom:1px solid #E2E8F0;">
-                <td style="padding:12px 0; color:#475569; width:45%;">Dataset</td>
-                <td style="padding:12px 0; color:#0F172A; font-weight:600;">BraTS-PEDs 2024</td>
-            </tr>
-            <tr style="border-bottom:1px solid #E2E8F0;">
-                <td style="padding:12px 0; color:#475569;">Subjects in this project</td>
-                <td style="padding:12px 0; color:#0284C7; font-weight:600;">227 (53 + 92 training, 82 held out)</td>
-            </tr>
-            <tr style="border-bottom:1px solid #E2E8F0;">
-                <td style="padding:12px 0; color:#475569;">Supported Modalities</td>
-                <td style="padding:12px 0; color:#0F172A;">T1, T1c, T2, FLAIR</td>
-            </tr>
-            <tr>
-                <td style="padding:12px 0; color:#475569;">Primary Task</td>
-                <td style="padding:12px 0; color:#0F172A;">Pediatric Tumor Segmentation</td>
-            </tr>
-        </table>
-    </div>
-    """, unsafe_allow_html=True)
+col_roc, col_table = st.columns([1.2, 1])
+
+with col_roc:
+    fig_roc = go.Figure()
+    # Plotting the ROC curve using FPR and TPR from the JSON cache
+    for reg, color in colors.items():
+        fpr = regions_data[reg].get("fpr", [])
+        tpr = regions_data[reg].get("tpr", [])
+        auc = regions_data[reg].get("auc", 0.0)
+        
+        # Subsampling for performance if arrays are too large, but Plotly handles it well
+        fig_roc.add_trace(go.Scatter(
+            x=fpr, y=tpr, 
+            mode='lines', 
+            name=f"{names[reg]} (AUC = {auc:.3f})",
+            line=dict(color=color, width=2.5)
+        ))
+        
+    # Add random guess diagonal line
+    fig_roc.add_trace(go.Scatter(
+        x=[0, 1], y=[0, 1], 
+        mode='lines', 
+        name="Random Guess",
+        line=dict(color='gray', width=1.5, dash='dash'),
+        showlegend=False
+    ))
+
+    fig_roc.update_layout(
+        xaxis_title="False Positive Rate (FPR)",
+        yaxis_title="True Positive Rate (TPR)",
+        xaxis=dict(range=[0, 1]), yaxis=dict(range=[0, 1]),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        height=400, margin=dict(t=20, b=40, l=40, r=20),
+        legend=dict(x=0.5, y=0.1, bgcolor='rgba(255,255,255,0.7)')
+    )
+    st.plotly_chart(fig_roc, use_container_width=True, config={'displayModeBar': False})
+
+with col_table:
+    # Build a clean DataFrame for the metrics
+    table_data = []
+    for reg in ['ET', 'TC', 'WT']:
+        table_data.append({
+            "Region": names[reg],
+            "Dice": f"{regions_data[reg].get('dice', 0):.3f}",
+            "Sensitivity": f"{regions_data[reg].get('sensitivity', 0):.3f}",
+            "Specificity": f"{regions_data[reg].get('specificity', 0):.4f}",
+            "Precision": f"{regions_data[reg].get('precision', 0):.3f}",
+            "AUC": f"{regions_data[reg].get('auc', 0):.3f}"
+        })
+    
+    df = pd.DataFrame(table_data)
+    
+    st.markdown("<br>", unsafe_allow_html=True) # Spacer
+    st.dataframe(
+        df,
+        column_config={
+            "Region": st.column_config.TextColumn("Tumor Region", width="medium"),
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+    
+    st.info("💡 **Note:** Metrics are computed over all non-background pixels across 82 held-out subjects. Specificity appears artificially high due to class imbalance (background dominance).")
 
 # ──────────────────────────────────────────────────────────
 #  FOOTER
 # ──────────────────────────────────────────────────────────
 st.markdown("""
-<div class="dash-footer">
-    NEUROPEDS AI &nbsp;·&nbsp; PEDIATRIC ONCOLOGY DECISION SUPPORT &nbsp;·&nbsp; 2026
+<div style="text-align:center; padding:30px; font-size:0.85rem; color:#94A3B8; border-top:1px solid #E2E8F0; margin-top: 40px; font-weight: 500;">
+    NEUROPEDS AI &nbsp;·&nbsp; CLINICAL DECISION SUPPORT &nbsp;·&nbsp; 2026
 </div>
 """, unsafe_allow_html=True)
