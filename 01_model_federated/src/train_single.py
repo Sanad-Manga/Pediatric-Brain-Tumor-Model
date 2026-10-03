@@ -15,6 +15,7 @@ from .config import TrainConfig
 from .data import build_dataset
 from .model import FederatedUNet3D, build_model
 from .region_loss import RegionDiceBCELoss, RegionHybridLoss
+from .sampling import build_small_et_sampler
 
 
 def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
@@ -30,7 +31,8 @@ def _step_scheduler_clamped(scheduler, lr_horizon: int) -> None:
         scheduler.step()
 
 
-def _build_loss(loss_kind: str, class_weights: list[float] | None = None):
+def _build_loss(loss_kind: str, class_weights: list[float] | None = None, region_terms: str = "both",
+                et_pos_weight: float = 1.0):
     """dice_ce (original): plain CrossEntropy has no notion of a rare class --
     ET is the smallest region by voxel count of the 4, and a real overnight run
     on real data (2026-09-22) showed ET-specific held-out Dice declining while
@@ -61,11 +63,13 @@ def _build_loss(loss_kind: str, class_weights: list[float] | None = None):
     if loss_kind == "dice_focal":
         weight = torch.tensor(class_weights, dtype=torch.float32) if class_weights is not None else None
         return DiceFocalLoss(to_onehot_y=True, softmax=True, include_background=True, gamma=2.0, weight=weight)
+    if loss_kind in ("region_dice_bce", "region_hybrid") and class_weights is not None:
+        raise ValueError(f"class_weights cannot be used with {loss_kind}")
     if loss_kind == "region_dice_bce":
-        if class_weights is not None:
-            raise ValueError("class_weights cannot be used with region_dice_bce")
-        return RegionDiceBCELoss()
-    raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal' or 'region_dice_bce', got {loss_kind!r}")
+        return RegionDiceBCELoss(terms=region_terms, et_pos_weight=et_pos_weight)
+    if loss_kind == "region_hybrid":
+        return RegionHybridLoss()
+    raise ValueError(f"loss_kind must be 'dice_ce', 'dice_focal', 'region_dice_bce' or 'region_hybrid', got {loss_kind!r}")
 
 
 def _apply_augmentation(
@@ -91,6 +95,10 @@ def train_single_client(
     loss_kind: str = "dice_ce",
     eval_every: int = 0,
     heldout_scorer: Callable | None = None,
+    region_terms: str = "both",
+    et_pos_weight: float = 1.0,
+    small_et_weight: float | None = None,
+    small_et_max_voxels: int = 600,
 ) -> tuple[FederatedUNet3D, list[float]]:
     """Trains `model` (or a fresh one) on the given manifest for num_epochs.
 
@@ -133,14 +141,25 @@ def train_single_client(
 
     model = (model or build_model(config.model_width, config.model_depth)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
-    loss_fn = _build_loss(loss_kind, config.class_weights).to(device)
+    loss_fn = _build_loss(loss_kind, config.class_weights, region_terms, et_pos_weight).to(device)
 
     dataset = build_dataset(
         manifest_path, data_mode=config.data_mode, cache_path=config.cache_path,
         patch_size=config.patch_size, patches_per_epoch=config.patches_per_epoch,
         patch_fractions=config.patch_fractions, patch_seed=config.seed,
     )
-    loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    if small_et_weight is None:
+        loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    else:
+        # Addendum 9: oversample small-ET patients; ET-free patients keep their uniform share.
+        if config.data_mode == "patch":
+            raise ValueError("small_et_weight is not supported with data_mode='patch' (it has its own ET-aware sampler)")
+        sampler, et_counts = build_small_et_sampler(dataset, small_et_weight, small_et_max_voxels)
+        n_free = sum(c == 0 for c in et_counts)
+        n_small = sum(0 < c <= small_et_max_voxels for c in et_counts)
+        print(f"small-ET sampler: weight {small_et_weight}, max_voxels {small_et_max_voxels} | "
+              f"{n_free} ET-free, {n_small} small-ET, {len(et_counts) - n_free - n_small} large-ET patients", flush=True)
+        loader = DataLoader(dataset, batch_size=config.batch_size, sampler=sampler)
 
     start_epoch = 0
     losses: list[float] = []
@@ -233,7 +252,11 @@ def train_single_client(
             model.state_dict(),
             optimizer.state_dict(),
             extra={"avg_loss": avg_loss, "n_skipped_nonfinite": n_skipped, "lr": current_lr,
-                  "loss_kind": loss_kind},
+                  "loss_kind": loss_kind,
+                  **({"small_et_weight": small_et_weight, "small_et_max_voxels": small_et_max_voxels}
+                     if small_et_weight is not None else {}),
+                  **({"region_terms": region_terms, "et_pos_weight": et_pos_weight}
+                     if loss_kind == "region_dice_bce" else {})},
             model_width=config.model_width,
             model_depth=config.model_depth,
         )
