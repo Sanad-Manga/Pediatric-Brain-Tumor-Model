@@ -79,7 +79,6 @@ def load_patient_data(patient_id):
     lbl_3d = np.load(patient_dir / "labels_3d.npz")["labels"]
     lbl_rstar = np.load(patient_dir / "labels_rstar.npz")["labels"]
     
-    # ─── Load Issue #44 Flagged Spots (Graceful Fallback) ───
     review_mask = None
     review_spots = []
     
@@ -97,15 +96,12 @@ def get_background_slice(patient_id, slice_idx):
     bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx:03d}.npz"
     if bg_path.exists():
         img_arr = np.load(bg_path)["image"][0]
-        # Force a memory copy after rotation so Plotly can render it properly
         return np.rot90(img_arr, 2).copy()
     return None
 
 def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False):
-    """Generate an interactive Plotly visualization for MRI, segmentation, and review flags."""
     fig = go.Figure()
     
-    # ─── Force contiguous memory arrays after transpose for Radiological View ───
     if bg_img is not None:
         bg_img = np.ascontiguousarray(bg_img.T.copy())
     
@@ -114,31 +110,27 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
     if review_img is not None:
         review_img = np.ascontiguousarray(review_img.T.copy())
 
-    # Render MRI Background
     if bg_img is not None:
         fig.add_trace(go.Heatmap(z=bg_img, colorscale='gray', showscale=False, hoverinfo='skip'))
     else:
-        # Set zmin=0, zmax=1 to force a black background instead of gray
         fig.add_trace(go.Heatmap(z=np.zeros_like(mask_img), colorscale='gray', zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
         
-    # Render Base Segmentation Overlay
     if show_mask:
         mask_display = np.where(mask_img == 0, np.nan, mask_img)
         colorscale = [
             [0.00, 'rgba(0,0,0,0)'],
-            [0.25, 'rgba(239,68,68,0.65)'],   # 1: ET (Red)
-            [0.50, 'rgba(16,185,129,0.65)'],  # 2: NETC (Green)
-            [0.75, 'rgba(59,130,246,0.65)'],  # 3: CC (Blue)
-            [1.00, 'rgba(234,179,8,0.65)']    # 4: ED (Yellow)
+            [0.25, 'rgba(239,68,68,0.65)'],
+            [0.50, 'rgba(16,185,129,0.65)'],
+            [0.75, 'rgba(59,130,246,0.65)'],
+            [1.00, 'rgba(234,179,8,0.65)']
         ]
         fig.add_trace(go.Heatmap(z=mask_display, colorscale=colorscale, zmin=0, zmax=4, showscale=False, hoverinfo='skip'))
 
-    # Render Flagged Review Spots (High-visibility Magenta)
     if show_review and review_img is not None:
         review_display = np.where(review_img == 0, np.nan, 1)
         review_colorscale = [
             [0.0, 'rgba(0,0,0,0)'],
-            [1.0, 'rgba(217,70,239,0.9)'] # Magenta
+            [1.0, 'rgba(217,70,239,0.9)']
         ]
         fig.add_trace(go.Heatmap(z=review_display, colorscale=review_colorscale, zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
 
@@ -170,7 +162,6 @@ def main():
     if selected_patient:
         meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots = load_patient_data(selected_patient)
         
-        # Status Badges
         status = meta.get("rstar_status", "unknown")
         warnings = meta.get("rstar_warnings", [])
         
@@ -180,9 +171,28 @@ def main():
             
         st.divider()
         
-        # Controls
+        # ─── DYNAMIC SLICE RANGE CALCULATION ───
         max_slice = lbl_rstar.shape[2] - 1
         has_review = len(review_spots) > 0
+        
+        demo_axial_dir = DEMO_CACHE / selected_patient / "axial"
+        avail_bg_slices = []
+        if demo_axial_dir.exists():
+            for f in demo_axial_dir.glob("slice_*.npz"):
+                try:
+                    avail_bg_slices.append(int(f.stem.split('_')[1]))
+                except ValueError:
+                    pass
+                    
+        if avail_bg_slices:
+            min_bg = min(avail_bg_slices)
+            max_bg = max(avail_bg_slices)
+            default_slice = (min_bg + max_bg) // 2
+            bg_caption = f"ℹ️ Background MRI available for slices {min_bg}–{max_bg}. Other slices display on a black canvas."
+        else:
+            default_slice = max_slice // 2
+            bg_caption = "ℹ️ Background MRI unavailable for this demo record. Slices display on a black canvas."
+        # ───────────────────────────────────────
         
         if has_review:
             col_slider, col_toggle1, col_toggle2 = st.columns([2, 1, 1])
@@ -190,8 +200,8 @@ def main():
             col_slider, col_toggle1 = st.columns([3, 1])
             
         with col_slider:
-            slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, max_slice // 2)
-            st.caption("ℹ️ Background MRI available for slices 29-109 on select demo patients (e.g. 00021, 00051). Other slices display on a black canvas.")
+            slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, default_slice)
+            st.caption(bg_caption)
             
         with col_toggle1:
             st.write("") 
@@ -205,11 +215,9 @@ def main():
             
         bg_img = get_background_slice(selected_patient, slice_idx)
             
-        # Interactive Viewers
         img_col1, img_col2, img_col3 = st.columns(3)
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
-        # FIX: Pass None and False to 2D and 3D viewers so flags only show on R*
         with img_col1:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
@@ -220,7 +228,6 @@ def main():
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>R* (Fusion)</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_rstar[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
 
-        # ─── Expert Review Section (Issue #44) ───
         if has_review:
             st.markdown(f"""
             <div class="review-alert">
@@ -253,7 +260,6 @@ def main():
 
         st.divider()
         
-        # ─── Multi-Model Metrics Dashboard ───
         st.markdown("<h3 style='font-family: Outfit, sans-serif; color: #0F172A;'>📊 Multi-Model Performance Comparison</h3>", unsafe_allow_html=True)
         st.caption("Dice similarity coefficient per region across all architectures.")
         
