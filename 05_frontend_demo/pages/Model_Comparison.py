@@ -180,8 +180,8 @@ def main():
         st.error("Comparison cache directory not found or empty.")
         return
         
-    # Open on a patient with an MRI background and a typical result; failures are one click away.
-    default_patient = "BraTS-PED-00021-000"
+    # Open on a clean, typical result (all three models agree, R* best); failures are one click away.
+    default_patient = "BraTS-PED-00257-000"
     selected_patient = st.selectbox("Select Patient Record", patients,
                                     index=patients.index(default_patient) if default_patient in patients else 0)
     
