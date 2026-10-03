@@ -1,0 +1,9 @@
+[
+ {
+  "spot_id": 1,
+  "voxels": 92,
+  "mean_et_prob": 0.3748585876563321,
+  "models_agree": 0.7347826086956522,
+  "reason": "low_confidence"
+ }
+]

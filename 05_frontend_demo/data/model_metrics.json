@@ -1,0 +1,135 @@
+{
+  "_about": "python 05_frontend_demo/utils/build_model_metrics.py\n\nModels, exactly as on the comparison page:\n  2D  = shipped 2D ensemble, argmax\n  3D  = deployed 4-member 96^3 family (flip-TTA), argmax, then the 500 mm^3 enhancing-tumour rule\n  R*  = 2D 0.5 + 3D 0.5, background x0.5, argmax, then the 500 mm^3 rule (the deployed R* pipeline)\nRegions: ET = label 1, TC = labels 1-3, WT = labels 1-4.\n\nTwo summaries per test set:\n  per_patient_mean_dice : mean over patients of the (ET+TC+WT)/3 Dice (empty prediction of an empty region = 1)\n  pooled                : Dice / sensitivity / precision over all voxels of all patients pooled together\nTest sets: fresh-30 (never used for any choice; the clean test) and held-out 81 (some R* settings were tuned on it).",
+  "sets": {
+    "fresh30": {
+      "n_patients": 30,
+      "models": {
+        "2d": {
+          "per_patient_mean_dice": 0.7113,
+          "pooled": {
+            "ET": {
+              "dice": 0.7081,
+              "sensitivity": 0.6199,
+              "precision": 0.8255
+            },
+            "TC": {
+              "dice": 0.7176,
+              "sensitivity": 0.5873,
+              "precision": 0.9221
+            },
+            "WT": {
+              "dice": 0.7367,
+              "sensitivity": 0.5984,
+              "precision": 0.958
+            }
+          }
+        },
+        "3d": {
+          "per_patient_mean_dice": 0.747,
+          "pooled": {
+            "ET": {
+              "dice": 0.6586,
+              "sensitivity": 0.6451,
+              "precision": 0.6726
+            },
+            "TC": {
+              "dice": 0.7764,
+              "sensitivity": 0.6872,
+              "precision": 0.8923
+            },
+            "WT": {
+              "dice": 0.8155,
+              "sensitivity": 0.7358,
+              "precision": 0.9145
+            }
+          }
+        },
+        "rstar": {
+          "per_patient_mean_dice": 0.8051,
+          "pooled": {
+            "ET": {
+              "dice": 0.7235,
+              "sensitivity": 0.6591,
+              "precision": 0.802
+            },
+            "TC": {
+              "dice": 0.8037,
+              "sensitivity": 0.7353,
+              "precision": 0.8862
+            },
+            "WT": {
+              "dice": 0.8263,
+              "sensitivity": 0.7528,
+              "precision": 0.9157
+            }
+          }
+        }
+      }
+    },
+    "heldout": {
+      "n_patients": 81,
+      "models": {
+        "2d": {
+          "per_patient_mean_dice": 0.7549,
+          "pooled": {
+            "ET": {
+              "dice": 0.6564,
+              "sensitivity": 0.5569,
+              "precision": 0.7993
+            },
+            "TC": {
+              "dice": 0.8028,
+              "sensitivity": 0.7362,
+              "precision": 0.8827
+            },
+            "WT": {
+              "dice": 0.8401,
+              "sensitivity": 0.7668,
+              "precision": 0.9289
+            }
+          }
+        },
+        "3d": {
+          "per_patient_mean_dice": 0.7773,
+          "pooled": {
+            "ET": {
+              "dice": 0.5823,
+              "sensitivity": 0.5153,
+              "precision": 0.6693
+            },
+            "TC": {
+              "dice": 0.7993,
+              "sensitivity": 0.7406,
+              "precision": 0.8679
+            },
+            "WT": {
+              "dice": 0.8516,
+              "sensitivity": 0.8073,
+              "precision": 0.9011
+            }
+          }
+        },
+        "rstar": {
+          "per_patient_mean_dice": 0.8096,
+          "pooled": {
+            "ET": {
+              "dice": 0.66,
+              "sensitivity": 0.5855,
+              "precision": 0.7562
+            },
+            "TC": {
+              "dice": 0.8166,
+              "sensitivity": 0.7904,
+              "precision": 0.8445
+            },
+            "WT": {
+              "dice": 0.8684,
+              "sensitivity": 0.8528,
+              "precision": 0.8846
+            }
+          }
+        }
+      }
+    }
+  }
+}

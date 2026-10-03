@@ -1,0 +1,37 @@
+[
+ {
+  "spot_id": 1,
+  "voxels": 7064,
+  "mean_et_prob": 0.37536435774690974,
+  "models_agree": 0.5652604756511891,
+  "reason": "low_confidence"
+ },
+ {
+  "spot_id": 2,
+  "voxels": 132,
+  "mean_et_prob": 0.36612449247728696,
+  "models_agree": 0.40151515151515155,
+  "reason": "low_confidence"
+ },
+ {
+  "spot_id": 3,
+  "voxels": 3311,
+  "mean_et_prob": 0.46336717196585225,
+  "models_agree": 0.4102688009664754,
+  "reason": "low_confidence"
+ },
+ {
+  "spot_id": 4,
+  "voxels": 1017,
+  "mean_et_prob": 0.4379119376927585,
+  "models_agree": 0.23677482792527044,
+  "reason": "low_confidence"
+ },
+ {
+  "spot_id": 5,
+  "voxels": 1773,
+  "mean_et_prob": 0.3581875745465509,
+  "models_agree": 0.675014100394811,
+  "reason": "low_confidence"
+ }
+]

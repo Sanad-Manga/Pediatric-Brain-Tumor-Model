@@ -10,6 +10,7 @@ import pandas as pd
 #  CONFIG & LOAD DATA
 # ──────────────────────────────────────────────────────────
 DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "roc_cache.json"
+MODEL_METRICS_PATH = Path(__file__).resolve().parents[1] / "data" / "model_metrics.json"   # utils/build_model_metrics.py
 
 @st.cache_data
 def load_metrics():
@@ -20,6 +21,18 @@ def load_metrics():
         return None
 
 metrics_data = load_metrics()
+
+
+@st.cache_data
+def load_model_metrics():
+    try:
+        with open(MODEL_METRICS_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+
+model_metrics = load_model_metrics()
 
 if metrics_data:
     epoch_val = metrics_data.get("checkpoint", {}).get("epochs_completed", 0)
@@ -104,7 +117,7 @@ st.markdown("""
     </div>
     <div class="hero-title">Pediatric Brain Tumor<br>Performance Analytics</div>
     <div class="hero-sub">
-        Interactive visualization of the R* model ensemble performance evaluated on held-out BraTS-PEDs 2024 subjects. Data is bound dynamically to the validation cache.
+        How accurate each model is on patients it never trained on. R* (the 2D model and the 3D family combined) is the model we present; the 2D and 3D models are shown for comparison.
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -112,9 +125,71 @@ st.markdown("""
 # ──────────────────────────────────────────────────────────
 #  DYNAMIC STAT CARDS
 # ──────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────
+#  R* vs 2D vs 3D — same patients, same measurement
+# ──────────────────────────────────────────────────────────
+MODEL_NAMES = {"rstar": "R* (2D + 3D combined)", "2d": "2D model", "3d": "3D family"}
+if model_metrics:
+    f30, ho = model_metrics["sets"]["fresh30"], model_metrics["sets"]["heldout"]
+    r_f30, r_ho = f30["models"]["rstar"]["per_patient_mean_dice"], ho["models"]["rstar"]["per_patient_mean_dice"]
+    st.markdown('<div class="section-title">🏆 R* compared with the 2D and 3D models</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-subtitle">Mean Dice per patient, averaged over the three tumour regions (ET, TC, WT). '
+                'Fresh-30 is the clean test: 30 patients never used for any training or tuning decision.</div>',
+                unsafe_allow_html=True)
+    st.markdown(f"""
+<div class="stat-grid">
+    <div class="stat-card" style="border-color:#0EA5E9;">
+        <div class="stat-icon">🎯</div>
+        <div class="stat-label">R* · clean test</div>
+        <div class="stat-value">{r_f30:.3f}</div>
+        <div class="stat-delta">{f30['n_patients']} unseen patients</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🧪</div>
+        <div class="stat-label">R* · held-out</div>
+        <div class="stat-value">{r_ho:.3f}</div>
+        <div class="stat-delta" style="color:#64748B;">{ho['n_patients']} patients (some R* settings tuned here)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🖼️</div>
+        <div class="stat-label">2D model · clean test</div>
+        <div class="stat-value">{f30['models']['2d']['per_patient_mean_dice']:.3f}</div>
+        <div class="stat-delta" style="color:#64748B;">R* is {r_f30 - f30['models']['2d']['per_patient_mean_dice']:+.3f}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🧊</div>
+        <div class="stat-label">3D family · clean test</div>
+        <div class="stat-value">{f30['models']['3d']['per_patient_mean_dice']:.3f}</div>
+        <div class="stat-delta" style="color:#64748B;">R* is {r_f30 - f30['models']['3d']['per_patient_mean_dice']:+.3f}</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+    set_choice = st.radio("Test set for the table", ["Fresh-30 (clean test)", "Held-out (81)"], horizontal=True,
+                          key="dash_set")
+    chosen = f30 if set_choice.startswith("Fresh") else ho
+    region_names = {"ET": "Enhancing (ET)", "TC": "Core (TC)", "WT": "Whole (WT)"}
+    rows = []
+    for reg in ("ET", "TC", "WT"):
+        for key in ("rstar", "2d", "3d"):
+            m = chosen["models"][key]["pooled"][reg]
+            rows.append({"Region": region_names[reg], "Model": MODEL_NAMES[key], "Dice": f"{m['dice']:.3f}",
+                         "Sensitivity": f"{m['sensitivity']:.3f}", "Precision": f"{m['precision']:.3f}"})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.caption("Table: voxels of all patients in the set pooled together. Sensitivity = share of the real tumour the "
+               "model found; precision = share of what it marked that is really tumour. Specificity is left out: "
+               "background is almost the whole scan, so it is about 0.999 for every model and tells them apart by nothing.")
+    st.divider()
+
 if not metrics_data:
     st.error("⚠ Metrics cache (`roc_cache.json`) is missing.")
     st.stop()
+
+st.markdown('<div class="section-title">🔬 Shipped 2D model: detailed evaluation</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-subtitle">Everything below describes the 2D model only (the model the live MRI '
+            f'Analysis page runs), on {metrics_data.get("n_subjects", 82)} held-out patients, '
+            f'{metrics_data.get("slices_per_subject", 6)} sampled axial slices per patient. Not directly comparable '
+            f'with the R* table above, which uses whole volumes.</div>', unsafe_allow_html=True)
 
 st.markdown(f"""
 <div class="stat-grid">
@@ -132,9 +207,9 @@ st.markdown(f"""
     </div>
     <div class="stat-card">
         <div class="stat-icon">🎯</div>
-        <div class="stat-label">Global Mean Dice</div>
+        <div class="stat-label">2D mean Dice</div>
         <div class="stat-value">{mean_dice:.3f}</div>
-        <div class="stat-delta">ET, TC, WT Average</div>
+        <div class="stat-delta">ET, TC, WT average · sampled slices</div>
     </div>
     <div class="stat-card">
         <div class="stat-icon">📏</div>
@@ -148,7 +223,7 @@ st.markdown(f"""
 # ──────────────────────────────────────────────────────────
 #  INTERACTIVE CHARTS (PLOTLY)
 # ──────────────────────────────────────────────────────────
-st.markdown('<div class="section-title">📊 Regional Segmentation Profiling</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📊 2D model: accuracy by region</div>', unsafe_allow_html=True)
 st.markdown('<div class="section-subtitle">Comparing model precision, sensitivity, and surface distance across tumor sub-regions.</div>', unsafe_allow_html=True)
 
 col_radar, col_bar = st.columns([1.2, 1])
@@ -201,7 +276,7 @@ st.divider()
 # ──────────────────────────────────────────────────────────
 #  ADVANCED ANALYTICS (ROC & TABLE)
 # ──────────────────────────────────────────────────────────
-st.markdown('<div class="section-title">📈 Clinical Validation Metrics</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📈 2D model: ROC curves and summary</div>', unsafe_allow_html=True)
 st.markdown('<div class="section-subtitle">Receiver Operating Characteristic (ROC) curves and detailed statistical summary.</div>', unsafe_allow_html=True)
 
 col_roc, col_table = st.columns([1.2, 1])
@@ -266,7 +341,10 @@ with col_table:
         use_container_width=True
     )
     
-    st.info("💡 **Note:** Metrics are computed over all non-background pixels across 82 held-out subjects. Specificity appears artificially high due to class imbalance (background dominance).")
+    st.info(f"💡 **Note:** 2D model only. Pixels of {metrics_data.get('n_slices', 492)} sampled axial slices "
+            f"({metrics_data.get('slices_per_subject', 6)} per patient, up to {metrics_data.get('max_pixels_per_slice', 4000):,} pixels each) "
+            f"from {metrics_data.get('n_subjects', 82)} held-out patients, pooled. Specificity is near 1 for any model "
+            "because background dominates.")
 
 # ──────────────────────────────────────────────────────────
 #  FOOTER
