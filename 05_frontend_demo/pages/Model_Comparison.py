@@ -105,6 +105,12 @@ def load_display_volume(patient_id):
     return np.load(path)["t1c"] if path.exists() else None
 
 
+@st.cache_data
+def load_expert(patient_id):
+    """comparison_cache/<patient>/expert.npz (add_display_images.py): the expert segmentation, 0-4."""
+    return np.load(COMPARISON_CACHE / patient_id / "expert.npz")["labels"]
+
+
 def get_background_slice(patient_id, slice_idx):
     volume = load_display_volume(patient_id)
     if volume is not None:
@@ -291,7 +297,7 @@ def main():
                 with img_col4:
                     st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>Expert</h4>",
                                 unsafe_allow_html=True)
-                    expert = np.load(expert_path)["labels"]
+                    expert = load_expert(selected_patient)
                     st.plotly_chart(create_plotly_viewer(bg_img, expert[:, :, slice_idx], show_mask, None, False),
                                     use_container_width=True, config={'displayModeBar': False}, key="viewer_expert")
             if use_hires and has_review and show_review:
