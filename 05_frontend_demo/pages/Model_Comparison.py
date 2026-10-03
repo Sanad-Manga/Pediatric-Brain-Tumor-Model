@@ -98,7 +98,18 @@ def load_patient_data(patient_id):
             
     return meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots, lbl_rstar_hires
 
+@st.cache_data
+def load_display_volume(patient_id):
+    """comparison_cache/<patient>/t1c.npz (add_display_images.py): uint8 T1c volume in the same frame as the labels."""
+    path = COMPARISON_CACHE / patient_id / "t1c.npz"
+    return np.load(path)["t1c"] if path.exists() else None
+
+
 def get_background_slice(patient_id, slice_idx):
+    volume = load_display_volume(patient_id)
+    if volume is not None:
+        return volume[:, :, slice_idx].astype(np.float32)
+    # fallback: the older demo_cache slices (stored rotated 180 degrees relative to the labels)
     bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx:03d}.npz"
     if bg_path.exists():
         img_arr = np.load(bg_path)["image"][0]
@@ -187,7 +198,8 @@ def main():
         
         demo_axial_dir = DEMO_CACHE / selected_patient / "axial"
         avail_bg_slices = []
-        if demo_axial_dir.exists():
+        full_image = load_display_volume(selected_patient) is not None
+        if not full_image and demo_axial_dir.exists():
             for f in demo_axial_dir.glob("slice_*.npz"):
                 try:
                     avail_bg_slices.append(int(f.stem.split('_')[1]))
@@ -196,7 +208,10 @@ def main():
                     
         avail_bg_slices = sorted(avail_bg_slices)
         tumour_area = (lbl_rstar > 0).sum(axis=(0, 1))          # R* tumour voxels per axial slice
-        if avail_bg_slices:
+        if full_image:
+            default_slice = int(tumour_area.argmax())
+            bg_caption = "ℹ️ Background: T1c (contrast-enhanced) MRI. Opens on the slice with the most tumour."
+        elif avail_bg_slices:
             # demo_cache holds MRI images for only ~30 scattered slices; open on the imaged slice with most tumour
             default_slice = max(avail_bg_slices, key=lambda z: tumour_area[z])
             bg_caption = (f"ℹ️ MRI images exist for {len(avail_bg_slices)} slices of this patient "
@@ -227,6 +242,10 @@ def main():
         with cols[1]:
             st.write("") 
             show_mask = st.toggle("Overlay Segmentation", value=True)
+            expert_path = COMPARISON_CACHE / selected_patient / "expert.npz"
+            show_expert = expert_path.exists() and st.toggle("Expert segmentation", value=True,
+                                                             help="The expert's manual segmentation: the reference "
+                                                                  "every Dice number on this page is measured against.")
             
         idx = 2
         show_review = False
@@ -246,18 +265,21 @@ def main():
                 
         bg_img = get_background_slice(selected_patient, slice_idx)
             
-        img_col1, img_col2, img_col3 = st.columns(3)
+        if show_expert:
+            img_col1, img_col2, img_col3, img_col4 = st.columns(4)
+        else:
+            img_col1, img_col2, img_col3 = st.columns(3)
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
         # Decide which R* label mask to display
         active_rstar_lbl = lbl_rstar_hires if use_hires else lbl_rstar
-        rstar_title = "R* (Hi-Res)" if use_hires else "R* (Fusion)"
+        rstar_title = "R* hi-res" if use_hires else "R*"
         
         with img_col1:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D model</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
         with img_col2:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D Architecture</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D family</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
         with img_col3:
             st.markdown(f"<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>{rstar_title}</h4>", unsafe_allow_html=True)
@@ -265,8 +287,19 @@ def main():
             st.plotly_chart(create_plotly_viewer(bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice,
                                                  show_review and not use_hires),
                             use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
+            if show_expert:
+                with img_col4:
+                    st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>Expert</h4>",
+                                unsafe_allow_html=True)
+                    expert = np.load(expert_path)["labels"]
+                    st.plotly_chart(create_plotly_viewer(bg_img, expert[:, :, slice_idx], show_mask, None, False),
+                                    use_container_width=True, config={'displayModeBar': False}, key="viewer_expert")
             if use_hires and has_review and show_review:
                 st.caption("Flagged spots belong to the deployed R*; switch Hi-Res Mode off to see them.")
+
+        st.caption("Colours: red = enhancing tumour (ET) · green = non-enhancing core · blue = cyst · "
+                   "yellow = oedema · magenta = spot flagged for review (R* panel only). "
+                   "Tumour core (TC) = red + green + blue; whole tumour (WT) = all four.")
 
         if has_review:
             st.markdown(f"""
