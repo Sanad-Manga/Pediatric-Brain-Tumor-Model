@@ -57,6 +57,24 @@
         "precision": 0.991,
         "recall": 0.5852
       }
+    },
+    "rstar_hires": {
+      "ET": {
+        "dice": 0.3879,
+        "precision": 0.523,
+        "recall": 0.3083
+      },
+      "NC": {
+        "dice": 0.2906,
+        "precision": 0.9529,
+        "recall": 0.1714
+      },
+      "WT": {
+        "dice": 0.7385,
+        "precision": 0.9905,
+        "recall": 0.5887
+      }
     }
-  }
+  },
+  "rstar_hires_note": "Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family. Better on both test sets in a saved-output test (held-out 0.814 vs 0.810, fresh-30 0.815 vs 0.805, no extra false enhancing tumour); needs cross-validation before it can replace R*."
 }
