@@ -4,63 +4,86 @@ st.set_page_config(page_title="Tumor Subregion Guide | NeuroPeds AI", page_icon=
 
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+* { font-family: 'Inter', "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif; }
+
 .page-hero {
-    background: radial-gradient(circle at 20% 50%, rgba(56,189,248,0.09), transparent 50%),
-                linear-gradient(135deg,#F8FAFC,#E0F2FE);
-    border:1px solid rgba(56,189,248,0.2); border-radius:20px; padding:40px 44px; margin-bottom:28px;
+    background: linear-gradient(135deg, #FFFFFF 0%, #F0F9FF 60%, #E0F2FE 100%);
+    border: 1px solid rgba(14, 165, 233, 0.15);
+    border-radius: 20px; padding: 30px 40px; margin-bottom: 25px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.02);
 }
-.page-title { font-size:2rem; font-weight:800; letter-spacing:-0.02em;
-    background:linear-gradient(135deg,#0F172A 30%,#0284C7);
-    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-bottom:8px; }
-.page-sub { color:#64748B; font-size:0.92rem; }
-.panel { background:#FFFFFF; border:1px solid #E2E8F0; border-radius:16px; padding:28px; margin-bottom:20px; }
-.panel-title { font-size:1rem; font-weight:700; color:#0F172A; margin-bottom:18px; }
-.sub-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.page-title {
+    font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; font-family: 'Outfit', sans-serif;
+    color: #0F172A; margin-bottom: 8px;
+}
+.page-sub { color: #475569; font-size: 0.95rem; line-height: 1.6;}
+
+.panel { 
+    background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; 
+    padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); 
+}
+.panel-title { 
+    font-size: 1.1rem; font-weight: 700; color: #0F172A; font-family: 'Outfit', sans-serif;
+    margin-bottom: 16px; display: flex; align-items: center; gap: 8px; 
+}
+
+.sub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .sub-card {
-    background:#F8FAFC; border-radius:14px; padding:20px;
-    transition: transform .2s ease, box-shadow .2s ease;
+    background: #F8FAFC; border-radius: 14px; padding: 20px; border: 1px solid transparent;
+    transition: all .2s ease;
 }
-.sub-card:hover { transform:translateY(-2px); }
-.sub-card.et  { border-left:4px solid #EF4444; }
-.sub-card.ed  { border-left:4px solid #A16207; }
-.sub-card.cc  { border-left:4px solid #2563EB; }
-.sub-card.net { border-left:4px solid #059669; }
-.sub-card:hover.et  { box-shadow:0 8px 24px rgba(239,68,68,0.12); }
-.sub-card:hover.ed  { box-shadow:0 8px 24px rgba(234,179,8,0.12); }
-.sub-card:hover.cc  { box-shadow:0 8px 24px rgba(59,130,246,0.12); }
-.sub-card:hover.net { box-shadow:0 8px 24px rgba(16,185,129,0.12); }
-.sub-num  { font-size:0.68rem; font-family:'JetBrains Mono',monospace; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px; }
-.et .sub-num  { color:#EF4444; } .ed .sub-num  { color:#A16207; }
-.cc .sub-num  { color:#2563EB; } .net .sub-num { color:#059669; }
-.sub-name { font-size:0.9rem; font-weight:700; color:#0F172A; margin-bottom:8px; }
-.sub-desc { font-size:0.8rem; color:#64748B; line-height:1.6; }
-.sub-badge { display:inline-block; margin-top:10px; padding:3px 10px; border-radius:6px; font-size:0.7rem; font-family:monospace; font-weight:600; }
-.et  .sub-badge { background:rgba(239,68,68,0.12); color:#EF4444; }
-.ed  .sub-badge { background:rgba(234,179,8,0.12); color:#A16207; }
-.cc  .sub-badge { background:rgba(59,130,246,0.12); color:#2563EB; }
-.net .sub-badge { background:rgba(16,185,129,0.12); color:#059669; }
-.xai-row { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.sub-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.04); }
+.sub-card.et  { border-left: 4px solid #EF4444; }
+.sub-card.ed  { border-left: 4px solid #F59E0B; }
+.sub-card.cc  { border-left: 4px solid #3B82F6; }
+.sub-card.net { border-left: 4px solid #10B981; }
+
+.sub-num  { font-size: 0.7rem; font-family: monospace; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 6px; }
+.et .sub-num  { color: #EF4444; } .ed .sub-num  { color: #F59E0B; }
+.cc .sub-num  { color: #3B82F6; } .net .sub-num { color: #10B981; }
+
+.sub-name { font-size: 0.95rem; font-weight: 700; color: #0F172A; margin-bottom: 8px; }
+.sub-desc { font-size: 0.85rem; color: #475569; line-height: 1.6; }
+.sub-badge { 
+    display: inline-block; margin-top: 12px; padding: 4px 10px; border-radius: 6px; 
+    font-size: 0.75rem; font-family: monospace; font-weight: 600; 
+}
+.et  .sub-badge { background: #FEF2F2; color: #DC2626; }
+.ed  .sub-badge { background: #FFFBEB; color: #D97706; }
+.cc  .sub-badge { background: #EFF6FF; color: #2563EB; }
+.net .sub-badge { background: #ECFDF5; color: #059669; }
+
 .xai-card {
-    background:#F8FAFC; border:1px solid #E2E8F0;
-    border-radius:14px; padding:20px; text-align:center;
-    transition: border-color .2s ease, transform .2s ease;
+    background: #F8FAFC; border: 1px solid #E2E8F0;
+    border-radius: 14px; padding: 20px;
+    transition: all .2s ease;
 }
-.xai-card:hover { border-color:rgba(56,189,248,0.3); transform:translateY(-2px); }
-.xai-icon { font-size:1.8rem; margin-bottom:10px; }
-.xai-name { font-size:0.85rem; font-weight:700; color:#0F172A; margin-bottom:6px; }
-.xai-desc { font-size:0.75rem; color:#64748B; line-height:1.5; }
-.modality-table { width:100%; border-collapse:collapse; font-size:0.84rem; }
-.modality-table th { text-align:left; padding:10px 12px; font-size:0.72rem; text-transform:uppercase;
-    letter-spacing:0.06em; color:#64748B; border-bottom:1px solid #E2E8F0; }
-.modality-table td { padding:12px; border-bottom:1px solid #E2E8F0; color:#334155; }
-.modality-table tr:last-child td { border-bottom:none; }
-.disclaimer { background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25);
-    border-radius:12px; padding:16px 20px; font-size:0.83rem; color:#FCA5A5; line-height:1.6; }
+.xai-icon { font-size: 1.8rem; margin-bottom: 10px; }
+.xai-name { font-size: 0.95rem; font-weight: 700; color: #0F172A; margin-bottom: 6px; }
+.xai-desc { font-size: 0.85rem; color: #475569; line-height: 1.6; }
+
+.modality-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.modality-table th { 
+    text-align: left; padding: 12px; font-size: 0.75rem; text-transform: uppercase;
+    color: #64748B; border-bottom: 1px solid #E2E8F0; background: #F8FAFC;
+}
+.modality-table td { padding: 14px 12px; border-bottom: 1px solid #E2E8F0; color: #334155; }
+.modality-table tr:last-child td { border-bottom: none; }
+
+.disclaimer {
+    background: #FEF2F2;
+    border-left: 4px solid #EF4444; border-radius: 12px; padding: 16px 20px;
+    font-size: 0.9rem; color: #991B1B; line-height: 1.5; margin-top: 24px;
+    display: flex; align-items: flex-start; gap: 12px;
+}
+.disclaimer-icon { font-size: 1.4rem; }
+.disclaimer-content b { color: #7F1D1D; font-size: 0.95rem; display: block; margin-bottom: 4px; }
 </style>
 
 <div class="page-hero">
-    <div class="page-title">Tumor Subregion Guide</div>
-    <div class="page-sub">Reference for the BraTS-PEDs tumor subregions and the MRI modalities the model reads.</div>
+    <div class="page-title">🩺 Tumor Subregion Guide</div>
+    <div class="page-sub">Reference documentation for the BraTS-PEDs tumor subregions and the multi-modal MRI sequences processed by the AI engine.</div>
 </div>
 
 <div class="panel">
@@ -94,13 +117,11 @@ st.markdown("""
 </div>
 
 <div class="panel">
-    <div class="panel-title">🔍 Explainability</div>
-    <div class="xai-row">
-        <div class="xai-card">
-            <div class="xai-icon">ℹ️</div>
-            <div class="xai-name">Not implemented in this demo</div>
-            <div class="xai-desc">Grad-CAM, attention rollout and uncertainty maps are not part of this app. The deployed model is a 2D U-Net ensemble with no attention layers, and explaining its predictions is future work. What you can inspect today is the predicted segmentation overlay and per-region Dice on held-out patients.</div>
-        </div>
+    <div class="panel-title">🔍 Explainability Module</div>
+    <div class="xai-card">
+        <div class="xai-icon">ℹ️</div>
+        <div class="xai-name">Not Implemented in Current Build</div>
+        <div class="xai-desc">Grad-CAM, attention rollout, and uncertainty maps are currently out-of-scope for this phase of the app. The deployed model is an ensemble without attention layers. Explaining its predictions visually is planned for future work. Currently, clinical interpretation relies on the predicted segmentation overlays and per-region performance metrics (Dice/HD95).</div>
     </div>
 </div>
 
@@ -108,56 +129,22 @@ st.markdown("""
     <div class="panel-title">📡 MRI Modality Reference</div>
     <table class="modality-table">
         <thead>
-            <tr><th>Modality</th><th>Key Visualization</th><th>Primary Subregion</th><th>Signal</th></tr>
+            <tr><th>Modality</th><th>Key Visualization</th><th>Primary Subregion Target</th><th>Signal Profile</th></tr>
         </thead>
         <tbody>
-            <tr><td><b style="color:#0284C7;">T1</b></td><td>Anatomical baseline, CSF dark</td><td>Non-Enhancing Tumor (NET)</td><td>Gray matter / White matter contrast</td></tr>
+            <tr><td><b style="color:#0EA5E9;">T1</b></td><td>Anatomical baseline, CSF dark</td><td>Non-Enhancing Tumor (NET)</td><td>Gray matter / White matter contrast</td></tr>
             <tr><td><b style="color:#4F46E5;">T1c</b></td><td>Contrast-enhancing lesion</td><td>Enhancing Tumor (ET)</td><td>Bright on active regions</td></tr>
-            <tr><td><b style="color:#059669;">T2</b></td><td>Fluid & edema bright</td><td>Cystic Component (CC)</td><td>Hyperintense fluid</td></tr>
-            <tr><td><b style="color:#B45309;">FLAIR</b></td><td>CSF suppressed, edema bright</td><td>Peritumoral Edema (ED)</td><td>Perilesional high signal</td></tr>
+            <tr><td><b style="color:#10B981;">T2</b></td><td>Fluid & edema bright</td><td>Cystic Component (CC)</td><td>Hyperintense fluid</td></tr>
+            <tr><td><b style="color:#F59E0B;">FLAIR</b></td><td>CSF suppressed, edema bright</td><td>Peritumoral Edema (ED)</td><td>Perilesional high signal</td></tr>
         </tbody>
     </table>
 </div>
-""", unsafe_allow_html=True)
 
-st.markdown("""
-<style>
-@keyframes pulseWarning {
-    0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-    70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-}
-.disclaimer {
-    background: linear-gradient(to right, rgba(254, 243, 199, 0.8), rgba(255, 251, 235, 0.9));
-    border-left: 4px solid #F59E0B;
-    border-radius: 12px; padding: 20px 24px;
-    font-size: 0.95rem; color: #92400E; line-height: 1.6; 
-    margin-top: 32px; margin-bottom: 20px;
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
-    display: flex; align-items: flex-start; gap: 16px;
-}
-.disclaimer-icon {
-    font-size: 1.5rem;
-    background: #FFFBEB;
-    border-radius: 50%;
-    width: 36px; height: 36px;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    animation: pulseWarning 2s infinite;
-}
-.disclaimer-content b {
-    color: #B45309;
-    font-size: 1rem;
-    display: block;
-    margin-bottom: 4px;
-}
-</style>
 <div class="disclaimer">
     <div class="disclaimer-icon">⚠️</div>
     <div class="disclaimer-content">
-        <b>Medical Disclaimer</b>
-        NeuroPeds AI is a research-grade decision support platform designed to assist clinicians and researchers.
-        It does not replace independent clinical diagnosis or professional medical judgment. All outputs are for research purposes only.
+        <b>Research Use Only</b>
+        NeuroPeds AI is a research-grade decision support platform designed to assist clinicians and researchers. It does not replace independent clinical diagnosis or professional medical judgment. All outputs are strictly for research purposes.
     </div>
 </div>
 """, unsafe_allow_html=True)
