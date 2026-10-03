@@ -105,7 +105,7 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
     """Generate an interactive Plotly visualization for MRI, segmentation, and review flags."""
     fig = go.Figure()
     
-    # ─── FIX: Force contiguous memory arrays after transpose ───
+    # ─── Force contiguous memory arrays after transpose for Radiological View ───
     if bg_img is not None:
         bg_img = np.ascontiguousarray(bg_img.T.copy())
     
@@ -209,12 +209,13 @@ def main():
         img_col1, img_col2, img_col3 = st.columns(3)
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
+        # FIX: Pass None and False to 2D and 3D viewers so flags only show on R*
         with img_col1:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
+            st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
         with img_col2:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D Architecture</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
+            st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
         with img_col3:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>R* (Fusion)</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_rstar[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
