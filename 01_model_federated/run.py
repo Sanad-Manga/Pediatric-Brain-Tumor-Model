@@ -69,7 +69,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--lr-horizon", type=int, default=None, action=_StoreExplicit,
                     help="single-client only: cosine-anneal lr to 1e-5 over this many epochs "
                          "(fixed regardless of --epochs); default: no schedule")
-    p.add_argument("--loss", choices=["dice_ce", "dice_focal", "region_dice_bce"],
+    p.add_argument("--loss", choices=["dice_ce", "dice_focal", "region_dice_bce", "region_hybrid"],
                    default="dice_ce", action=_StoreExplicit,
                     help="single-client only: dice_focal down-weights easy/majority voxels, "
                          "a standard fix for the rare-class (ET) under-segmentation dice_ce shows; "
@@ -82,6 +82,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--et-pos-weight", type=float, default=1.0,
                     help="--loss region_dice_bce only: weight on positive enhancing-tumour voxels in the BCE term "
                          "(counteracts ET being ~1 in 1,279 voxels); 1.0 = unweighted")
+    p.add_argument("--small-et-weight", type=float, default=None,
+                    help="draw patients with a small enhancing tumour (1..--small-et-max-voxels ET voxels) this many "
+                         "times as often as patients with a larger one; tumour-free patients keep their share of "
+                         "draws. Unset = today's loader; 1.0 = the matched random-draw control")
+    p.add_argument("--small-et-max-voxels", type=int, default=None,
+                    help="upper ET-voxel count for 'small' in --small-et-weight (default 600 on the 96^3 grid)")
     p.add_argument("--patch-size", type=int, nargs=3, default=[128, 128, 128], metavar=("D", "H", "W"),
                     help="--data-mode patch only: crop size in voxels, each a multiple of 16")
     p.add_argument("--patches-per-epoch", type=int, default=580,
@@ -177,8 +183,26 @@ def parse_args(argv=None) -> argparse.Namespace:
                      "(the federated loop never reads --loss and would silently ignore it)")
     if args.loss_config.get("class_weights") is not None and args.use_federation:
         parser.error("loss.class_weights cannot be combined with --use-federation")
-    if args.loss == "region_dice_bce" and args.loss_config.get("class_weights") is not None:
-        parser.error("loss.class_weights cannot be combined with --loss region_dice_bce")
+    if args.loss in ("region_dice_bce", "region_hybrid") and args.loss_config.get("class_weights") is not None:
+        parser.error(f"loss.class_weights cannot be combined with --loss {args.loss}")
+    if not (args.et_pos_weight > 0.0 and math.isfinite(args.et_pos_weight)):  # also rejects NaN
+        parser.error(f"--et-pos-weight must be a positive finite number, got {args.et_pos_weight}")
+    if args.et_pos_weight != 1.0 and (args.loss != "region_dice_bce" or args.region_terms == "dice"):
+        parser.error(f"--et-pos-weight {args.et_pos_weight} requires --loss region_dice_bce with a BCE term "
+                     f"(got --loss {args.loss}, --region-terms {args.region_terms}); it would silently do nothing")
+    if args.region_terms != "both" and args.loss != "region_dice_bce":
+        parser.error(f"--region-terms {args.region_terms} requires --loss region_dice_bce (got --loss {args.loss}); "
+                     "it would silently do nothing")
+    if args.small_et_weight is not None and not (args.small_et_weight > 0.0 and math.isfinite(args.small_et_weight)):
+        parser.error(f"--small-et-weight must be a positive finite number, got {args.small_et_weight}")
+    if args.small_et_max_voxels is not None and args.small_et_weight is None:
+        parser.error("--small-et-max-voxels requires --small-et-weight (it would silently do nothing)")
+    if args.small_et_max_voxels is not None and args.small_et_max_voxels < 1:
+        parser.error(f"--small-et-max-voxels must be >= 1, got {args.small_et_max_voxels}")
+    if args.small_et_weight is not None and args.use_federation:
+        parser.error("--small-et-weight cannot be combined with --use-federation (the federated loop has no sampler)")
+    if args.small_et_weight is not None and args.data_mode == "patch":
+        parser.error("--small-et-weight cannot be combined with --data-mode patch (patch mode has its own sampler)")
     if args.data_mode == "patch" and args.use_federation:
         parser.error("--data-mode patch is single-client only; it cannot be combined with --use-federation")
     if args.eval_every < 0:
@@ -264,6 +288,10 @@ def main() -> None:
             loss_kind=args.loss,
             eval_every=args.eval_every,
             heldout_scorer=heldout_scorer,
+            region_terms=args.region_terms,
+            et_pos_weight=args.et_pos_weight,
+            small_et_weight=args.small_et_weight,
+            small_et_max_voxels=600 if args.small_et_max_voxels is None else args.small_et_max_voxels,
         )
         stopped_early = args.deadline_unix is not None and time.time() >= args.deadline_unix
         print(f"Single-client training complete ({len(losses)} epoch(s) this call"
