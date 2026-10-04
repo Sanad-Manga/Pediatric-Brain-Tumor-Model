@@ -1,5 +1,5 @@
 """Regression check for 05_frontend_demo: every page compiles AND renders content, no exceptions; comparison page
-numbers equal meta.json for every patient (R* and hi-res); flag tables equal review_spots.json.
+numbers equal meta.json for every patient (R*, hi-res and cleanup versions); flag tables equal review_spots.json.
 Run from 05_frontend_demo: python check_app.py"""
 import ast
 import json
@@ -26,10 +26,11 @@ for sid in at.selectbox[0].options:
     want = [f"{meta['regions'][k][r]['dice']:.4f}" for k in ("2d", "3d", "rstar") for r in ("ET", "NC", "WT")]
     spots = json.load(open(f"comparison_cache/{sid}/review_spots.json"))
     ok = not at.exception and [m.value for m in at.metric] == want and sum(len(d.value) for d in at.dataframe) == len(spots)
-    at.toggle[-1].set_value(True).run()
-    hw = [f"{meta['regions']['rstar_hires'][r]['dice']:.4f}" for r in ("ET", "NC", "WT")]
-    ok &= not at.exception and [m.value for m in at.metric][6:] == hw
-    at.toggle[-1].set_value(False).run()
+    for version, key in (("R* hi-res", "rstar_hires"), ("R* + fragment cleanup", "rstar_clean")):
+        at.radio(key="rstar_version").set_value(version).run()
+        want_v = [f"{meta['regions'][key][r]['dice']:.4f}" for r in ("ET", "NC", "WT")]
+        ok &= not at.exception and [m.value for m in at.metric][6:] == want_v
+    at.radio(key="rstar_version").set_value("R* (deployed)").run()
     bad += not ok
     if not ok:
         print("BAD", sid)

@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from pathlib import Path
 import plotly.graph_objects as go
+from scipy import ndimage
 
 # Directory setup
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -111,6 +112,12 @@ def load_expert(patient_id):
     return np.load(COMPARISON_CACHE / patient_id / "expert.npz")["labels"]
 
 
+def _go_to_change(patient_id, z):
+    """on_click: runs before the rerun, the only point where a drawn slider may be changed."""
+    st.session_state[f"only_imaged_{patient_id}"] = False
+    st.session_state[f"slice_{patient_id}"] = z
+
+
 def get_background_slice(patient_id, slice_idx):
     volume = load_display_volume(patient_id)
     if volume is not None:
@@ -122,7 +129,14 @@ def get_background_slice(patient_id, slice_idx):
         return np.rot90(img_arr, 2).copy()
     return None
 
-def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False):
+@st.cache_data
+def load_clean_labels(patient_id):
+    """comparison_cache/<patient>/labels_rstar_clean.npz (add_cleanup_option.py), or None."""
+    path = COMPARISON_CACHE / patient_id / "labels_rstar_clean.npz"
+    return np.load(path)["labels"] if path.exists() else None
+
+
+def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False, changed_img=None):
     fig = go.Figure()
     
     if bg_img is not None:
@@ -148,6 +162,11 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
             [1.00, 'rgba(234,179,8,0.65)']
         ]
         fig.add_trace(go.Heatmap(z=mask_display, colorscale=colorscale, zmin=0, zmax=4, showscale=False, hoverinfo='skip'))
+
+    if changed_img is not None and changed_img.any():
+        changed_display = np.where(np.ascontiguousarray(changed_img.T.copy()), 1, np.nan)
+        fig.add_trace(go.Heatmap(z=changed_display, colorscale=[[0.0, 'rgba(0,0,0,0)'], [1.0, 'rgba(255,255,255,0.95)']],
+                                 zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
 
     if show_review and review_img is not None:
         review_display = np.where(review_img == 0, np.nan, 1)
@@ -203,6 +222,9 @@ def main():
         max_slice = lbl_rstar.shape[2] - 1
         has_review = len(review_spots) > 0
         has_hires = lbl_rstar_hires is not None
+        lbl_rstar_clean = load_clean_labels(selected_patient)
+        has_clean = lbl_rstar_clean is not None
+        has_variants = has_hires or has_clean
         
         demo_axial_dir = DEMO_CACHE / selected_patient / "axial"
         avail_bg_slices = []
@@ -231,7 +253,7 @@ def main():
         # ─── DYNAMIC CONTROL PANEL LAYOUT ───
         layout = [2.5, 1]
         if has_review: layout.append(1)
-        if has_hires: layout.append(1.2) # Give hi-res toggle a slightly wider column
+        if has_variants: layout.append(1.4)  # the R* version chooser
         
         cols = st.columns(layout)
         
@@ -263,13 +285,15 @@ def main():
                 show_review = st.toggle("🟣 Flagged Spots", value=True)
             idx += 1
             
-        use_hires = False
-        if has_hires:
+        versions = ["R* (deployed)"] + (["R* + fragment cleanup"] if has_clean else []) + (["R* hi-res"] if has_hires else [])
+        version = versions[0]
+        if has_variants:
             with cols[idx]:
-                st.write("")
-                use_hires = st.toggle("✨ Hi-Res Mode", value=False,
-                                      help="Research option: R* with its 3D part averaged from the 96³ and 160³ "
-                                           "families. Not the deployed model.")
+                version = st.radio("R* version", versions, index=0, key="rstar_version",
+                                   help="The two extra versions are research options measured on 111 patients, "
+                                        "not the deployed model; see the note under the accuracy numbers.")
+        use_hires = version == "R* hi-res"
+        use_clean = version == "R* + fragment cleanup"
                 
         bg_img = get_background_slice(selected_patient, slice_idx)
             
@@ -280,8 +304,9 @@ def main():
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
         # Decide which R* label mask to display
-        active_rstar_lbl = lbl_rstar_hires if use_hires else lbl_rstar
-        rstar_title = "R* hi-res" if use_hires else "R*"
+        active_rstar_lbl = lbl_rstar_hires if use_hires else lbl_rstar_clean if use_clean else lbl_rstar
+        rstar_title = "R* hi-res" if use_hires else "R* clean" if use_clean else "R*"
+        changed = (lbl_rstar != lbl_rstar_clean) if use_clean else None
         
         with img_col1:
             st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D model</h4>", unsafe_allow_html=True)
@@ -293,7 +318,8 @@ def main():
             st.markdown(f"<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>{rstar_title}</h4>", unsafe_allow_html=True)
             # flags were computed from the deployed R*, so they are only drawn on it, not on the hi-res option
             st.plotly_chart(create_plotly_viewer(bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice,
-                                                 show_review and not use_hires),
+                                                 show_review and not use_hires,
+                                                 changed[:, :, slice_idx] if use_clean else None),
                             use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
             if show_expert:
                 with img_col4:
@@ -303,10 +329,11 @@ def main():
                     st.plotly_chart(create_plotly_viewer(bg_img, expert[:, :, slice_idx], show_mask, None, False),
                                     use_container_width=True, config={'displayModeBar': False}, key="viewer_expert")
             if use_hires and has_review and show_review:
-                st.caption("Flagged spots belong to the deployed R*; switch Hi-Res Mode off to see them.")
+                st.caption("Flagged spots belong to the deployed R*; choose another R* version to see them.")
 
         st.caption("Colours: red = enhancing tumour (ET) · green = non-enhancing core · blue = cyst · "
-                   "yellow = oedema · magenta = spot flagged for review (R* panel only). "
+                   "yellow = oedema · magenta = spot flagged for review (R* panel only) · "
+                   "white = what the fragment cleanup removed or relabelled (R* + cleanup only). "
                    "Tumour core (TC) = red + green + blue; whole tumour (WT) = all four.")
 
         if has_review:
@@ -358,12 +385,34 @@ def main():
 
         st.divider()
         
+        if use_clean:
+            pieces, n_pieces = ndimage.label(changed, np.ones((3, 3, 3), bool))
+            expert_all = load_expert(selected_patient) if expert_path.exists() else None
+            if n_pieces == 0:
+                st.info("The fragment cleanup changes nothing for this patient.")
+            else:
+                sizes = np.bincount(pieces.ravel())[1:]
+                order = np.argsort(-sizes)[:6]
+                st.info(f"The fragment cleanup changed {int(changed.sum())} voxels in {n_pieces} small pieces (white "
+                        "outline). Compare with the Expert panel: some pieces are false alarms, some are real tumour.")
+                change_cols = st.columns(min(len(order), 6))
+                for i, k in enumerate(order):
+                    piece = pieces == k + 1
+                    zs = np.where(piece.any(axis=(0, 1)))[0]
+                    mid = int(zs[np.argmax([piece[:, :, z].sum() for z in zs])])
+                    real = expert_all is not None and bool((piece & (expert_all > 0)).any())
+                    change_cols[i].button(f"Go to change {i + 1} ({int(sizes[k])} vox, slice {mid})",
+                                          key=f"gochange_{selected_patient}_{i}", on_click=_go_to_change, args=(selected_patient, mid),
+                                          help="Overlaps the expert's tumour" if real else "No expert tumour here")
+
         st.markdown(f"<h3 style='font-family: Outfit, sans-serif; color: #0F172A;'>📊 Accuracy for this patient "
                     f"({selected_patient})</h3>", unsafe_allow_html=True)
         
         # Display the research note if Hi-Res is active
         if use_hires and "rstar_hires_note" in meta:
             st.caption(f"🔬 **Research Option Active:** {meta['rstar_hires_note']}")
+        elif use_clean and "rstar_clean_note" in meta:
+            st.caption(f"🔬 **Research Option Active:** {meta['rstar_clean_note']}")
         else:
             st.caption("Dice per tumour region for the selected patient only (1 = perfect overlap with the expert). "
                        "Overall results across all test patients are on the Dashboard page.")
@@ -377,6 +426,9 @@ def main():
         if use_hires:
             metrics_rstar = meta.get("regions", {}).get("rstar_hires", {})
             col_3_title = "<b style='color:#0EA5E9;'>R* (Hi-Res)</b>"
+        elif use_clean:
+            metrics_rstar = meta.get("regions", {}).get("rstar_clean", {})
+            col_3_title = "<b style='color:#0EA5E9;'>R* + cleanup</b>"
         else:
             metrics_rstar = meta.get("regions", {}).get("rstar", {})
             col_3_title = "<b style='color:#0EA5E9;'>R* Fusion</b>"
