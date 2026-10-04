@@ -192,7 +192,7 @@ if model_metrics:
                                     text=[r["patient"] for r in pp],
                                     hovertemplate="%{text}<br>2D %{x:.3f} → R* %{y:.3f}<extra></extra>"))
         fig_pp.update_layout(xaxis=dict(title="2D model: mean Dice per patient", range=[0, 1.02]),
-                             yaxis=dict(title="R*: mean Dice per patient", range=[0, 1.02], scaleanchor="x"),
+                             yaxis=dict(title="R*: mean Dice per patient", range=[0, 1.02]),   # no scaleanchor: on Streamlit Cloud it overrode the ranges
                              height=420, margin=dict(t=10, b=40, l=50, r=10),
                              paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         col_pp, col_pp_text = st.columns([1.2, 1])
