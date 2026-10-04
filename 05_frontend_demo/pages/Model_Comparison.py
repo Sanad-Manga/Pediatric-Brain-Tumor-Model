@@ -158,10 +158,12 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
         fig.add_trace(go.Heatmap(z=review_display, colorscale=review_colorscale, zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
 
     fig.update_layout(
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False, autorange='reversed', scaleanchor='x'),
+        # constrain='domain': keep the slice square by shrinking the plot area, not by padding the image with black
+        xaxis=dict(showgrid=False, zeroline=False, visible=False, constrain='domain'),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False, autorange='reversed', scaleanchor='x',
+                   constrain='domain'),
         margin=dict(l=0, r=0, t=0, b=0),
-        plot_bgcolor='black',
+        plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         height=320
     )
