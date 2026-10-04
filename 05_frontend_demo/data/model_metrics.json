@@ -1,0 +1,805 @@
+{
+  "_about": "python 05_frontend_demo/utils/build_model_metrics.py\n\nModels, exactly as on the comparison page:\n  2D  = shipped 2D ensemble, argmax\n  3D  = deployed 4-member 96^3 family (flip-TTA), argmax, then the 500 mm^3 enhancing-tumour rule\n  R*  = 2D 0.5 + 3D 0.5, background x0.5, argmax, then the 500 mm^3 rule (the deployed R* pipeline)\nRegions: ET = label 1, TC = labels 1-3, WT = labels 1-4.\n\nTwo summaries per test set:\n  per_patient_mean_dice : mean over patients of the (ET+TC+WT)/3 Dice (empty prediction of an empty region = 1)\n  pooled                : Dice / sensitivity / precision over all voxels of all patients pooled together\n  per_patient           : each patient's (ET+TC+WT)/3 Dice for the three models\nTest sets: fresh-30 (never used for any choice; the clean test) and held-out 81 (some R* settings were tuned on it).",
+  "sets": {
+    "fresh30": {
+      "n_patients": 30,
+      "models": {
+        "2d": {
+          "per_patient_mean_dice": 0.7113,
+          "pooled": {
+            "ET": {
+              "dice": 0.7081,
+              "sensitivity": 0.6199,
+              "precision": 0.8255
+            },
+            "TC": {
+              "dice": 0.7176,
+              "sensitivity": 0.5873,
+              "precision": 0.9221
+            },
+            "WT": {
+              "dice": 0.7367,
+              "sensitivity": 0.5984,
+              "precision": 0.958
+            }
+          }
+        },
+        "3d": {
+          "per_patient_mean_dice": 0.747,
+          "pooled": {
+            "ET": {
+              "dice": 0.6586,
+              "sensitivity": 0.6451,
+              "precision": 0.6726
+            },
+            "TC": {
+              "dice": 0.7764,
+              "sensitivity": 0.6872,
+              "precision": 0.8923
+            },
+            "WT": {
+              "dice": 0.8155,
+              "sensitivity": 0.7358,
+              "precision": 0.9145
+            }
+          }
+        },
+        "rstar": {
+          "per_patient_mean_dice": 0.8051,
+          "pooled": {
+            "ET": {
+              "dice": 0.7235,
+              "sensitivity": 0.6591,
+              "precision": 0.802
+            },
+            "TC": {
+              "dice": 0.8037,
+              "sensitivity": 0.7353,
+              "precision": 0.8862
+            },
+            "WT": {
+              "dice": 0.8263,
+              "sensitivity": 0.7528,
+              "precision": 0.9157
+            }
+          }
+        }
+      },
+      "per_patient": [
+        {
+          "patient": "BraTS-PED-00077-000",
+          "2d": 0.8802,
+          "3d": 0.5425,
+          "rstar": 0.9156
+        },
+        {
+          "patient": "BraTS-PED-00103-000",
+          "2d": 0.4579,
+          "3d": 0.7612,
+          "rstar": 0.7799
+        },
+        {
+          "patient": "BraTS-PED-00115-000",
+          "2d": 0.8669,
+          "3d": 0.9317,
+          "rstar": 0.9343
+        },
+        {
+          "patient": "BraTS-PED-00127-000",
+          "2d": 0.4858,
+          "3d": 0.8485,
+          "rstar": 0.5981
+        },
+        {
+          "patient": "BraTS-PED-00128-000",
+          "2d": 0.9419,
+          "3d": 0.9247,
+          "rstar": 0.9341
+        },
+        {
+          "patient": "BraTS-PED-00129-000",
+          "2d": 0.8822,
+          "3d": 0.8483,
+          "rstar": 0.877
+        },
+        {
+          "patient": "BraTS-PED-00131-000",
+          "2d": 0.8013,
+          "3d": 0.7107,
+          "rstar": 0.7751
+        },
+        {
+          "patient": "BraTS-PED-00132-000",
+          "2d": 0.5079,
+          "3d": 0.8652,
+          "rstar": 0.8849
+        },
+        {
+          "patient": "BraTS-PED-00133-000",
+          "2d": 0.5748,
+          "3d": 0.6399,
+          "rstar": 0.6155
+        },
+        {
+          "patient": "BraTS-PED-00136-000",
+          "2d": 0.4787,
+          "3d": 0.7733,
+          "rstar": 0.7027
+        },
+        {
+          "patient": "BraTS-PED-00137-000",
+          "2d": 0.8355,
+          "3d": 0.8893,
+          "rstar": 0.8934
+        },
+        {
+          "patient": "BraTS-PED-00144-000",
+          "2d": 0.8127,
+          "3d": 0.2993,
+          "rstar": 0.8166
+        },
+        {
+          "patient": "BraTS-PED-00152-000",
+          "2d": 0.4564,
+          "3d": 0.526,
+          "rstar": 0.5517
+        },
+        {
+          "patient": "BraTS-PED-00163-000",
+          "2d": 0.6923,
+          "3d": 0.3905,
+          "rstar": 0.7366
+        },
+        {
+          "patient": "BraTS-PED-00178-000",
+          "2d": 0.7765,
+          "3d": 0.8864,
+          "rstar": 0.9071
+        },
+        {
+          "patient": "BraTS-PED-00179-000",
+          "2d": 0.7284,
+          "3d": 0.8334,
+          "rstar": 0.8564
+        },
+        {
+          "patient": "BraTS-PED-00182-000",
+          "2d": 0.8461,
+          "3d": 0.5339,
+          "rstar": 0.8852
+        },
+        {
+          "patient": "BraTS-PED-00211-000",
+          "2d": 0.7258,
+          "3d": 0.8573,
+          "rstar": 0.8339
+        },
+        {
+          "patient": "BraTS-PED-00218-000",
+          "2d": 0.1867,
+          "3d": 0.7099,
+          "rstar": 0.715
+        },
+        {
+          "patient": "BraTS-PED-00221-000",
+          "2d": 0.8993,
+          "3d": 0.8298,
+          "rstar": 0.8906
+        },
+        {
+          "patient": "BraTS-PED-00224-000",
+          "2d": 0.8838,
+          "3d": 0.7773,
+          "rstar": 0.8588
+        },
+        {
+          "patient": "BraTS-PED-00225-000",
+          "2d": 0.9435,
+          "3d": 0.8555,
+          "rstar": 0.8781
+        },
+        {
+          "patient": "BraTS-PED-00228-000",
+          "2d": 0.7429,
+          "3d": 0.841,
+          "rstar": 0.8383
+        },
+        {
+          "patient": "BraTS-PED-00232-000",
+          "2d": 0.9049,
+          "3d": 0.8394,
+          "rstar": 0.8796
+        },
+        {
+          "patient": "BraTS-PED-00236-000",
+          "2d": 0.6308,
+          "3d": 0.6033,
+          "rstar": 0.6169
+        },
+        {
+          "patient": "BraTS-PED-00243-000",
+          "2d": 0.6435,
+          "3d": 0.8225,
+          "rstar": 0.822
+        },
+        {
+          "patient": "BraTS-PED-00251-000",
+          "2d": 0.3567,
+          "3d": 0.8226,
+          "rstar": 0.7861
+        },
+        {
+          "patient": "BraTS-PED-00256-000",
+          "2d": 0.8391,
+          "3d": 0.7453,
+          "rstar": 0.8165
+        },
+        {
+          "patient": "BraTS-PED-00258-000",
+          "2d": 0.9328,
+          "3d": 0.8807,
+          "rstar": 0.9183
+        },
+        {
+          "patient": "BraTS-PED-00264-000",
+          "2d": 0.6246,
+          "3d": 0.62,
+          "rstar": 0.6347
+        }
+      ]
+    },
+    "heldout": {
+      "n_patients": 81,
+      "models": {
+        "2d": {
+          "per_patient_mean_dice": 0.7549,
+          "pooled": {
+            "ET": {
+              "dice": 0.6564,
+              "sensitivity": 0.5569,
+              "precision": 0.7993
+            },
+            "TC": {
+              "dice": 0.8028,
+              "sensitivity": 0.7362,
+              "precision": 0.8827
+            },
+            "WT": {
+              "dice": 0.8401,
+              "sensitivity": 0.7668,
+              "precision": 0.9289
+            }
+          }
+        },
+        "3d": {
+          "per_patient_mean_dice": 0.7773,
+          "pooled": {
+            "ET": {
+              "dice": 0.5823,
+              "sensitivity": 0.5153,
+              "precision": 0.6693
+            },
+            "TC": {
+              "dice": 0.7993,
+              "sensitivity": 0.7406,
+              "precision": 0.8679
+            },
+            "WT": {
+              "dice": 0.8516,
+              "sensitivity": 0.8073,
+              "precision": 0.9011
+            }
+          }
+        },
+        "rstar": {
+          "per_patient_mean_dice": 0.8096,
+          "pooled": {
+            "ET": {
+              "dice": 0.66,
+              "sensitivity": 0.5855,
+              "precision": 0.7562
+            },
+            "TC": {
+              "dice": 0.8166,
+              "sensitivity": 0.7904,
+              "precision": 0.8445
+            },
+            "WT": {
+              "dice": 0.8684,
+              "sensitivity": 0.8528,
+              "precision": 0.8846
+            }
+          }
+        }
+      },
+      "per_patient": [
+        {
+          "patient": "BraTS-PED-00003-000",
+          "2d": 0.8085,
+          "3d": 0.8207,
+          "rstar": 0.8327
+        },
+        {
+          "patient": "BraTS-PED-00004-000",
+          "2d": 0.31,
+          "3d": 0.4362,
+          "rstar": 0.4867
+        },
+        {
+          "patient": "BraTS-PED-00009-000",
+          "2d": 0.8649,
+          "3d": 0.8089,
+          "rstar": 0.8704
+        },
+        {
+          "patient": "BraTS-PED-00010-000",
+          "2d": 0.8674,
+          "3d": 0.8182,
+          "rstar": 0.8495
+        },
+        {
+          "patient": "BraTS-PED-00014-000",
+          "2d": 0.4973,
+          "3d": 0.578,
+          "rstar": 0.584
+        },
+        {
+          "patient": "BraTS-PED-00015-000",
+          "2d": 0.6813,
+          "3d": 0.687,
+          "rstar": 0.7031
+        },
+        {
+          "patient": "BraTS-PED-00021-000",
+          "2d": 0.9129,
+          "3d": 0.7934,
+          "rstar": 0.8903
+        },
+        {
+          "patient": "BraTS-PED-00025-000",
+          "2d": 0.9566,
+          "3d": 0.942,
+          "rstar": 0.9418
+        },
+        {
+          "patient": "BraTS-PED-00027-000",
+          "2d": 0.9064,
+          "3d": 0.8489,
+          "rstar": 0.8749
+        },
+        {
+          "patient": "BraTS-PED-00028-000",
+          "2d": 0.6324,
+          "3d": 0.7158,
+          "rstar": 0.7141
+        },
+        {
+          "patient": "BraTS-PED-00030-000",
+          "2d": 0.7228,
+          "3d": 0.5298,
+          "rstar": 0.6552
+        },
+        {
+          "patient": "BraTS-PED-00039-000",
+          "2d": 0.5831,
+          "3d": 0.5666,
+          "rstar": 0.9047
+        },
+        {
+          "patient": "BraTS-PED-00042-000",
+          "2d": 0.6202,
+          "3d": 0.5991,
+          "rstar": 0.6106
+        },
+        {
+          "patient": "BraTS-PED-00045-000",
+          "2d": 0.9029,
+          "3d": 0.881,
+          "rstar": 0.9032
+        },
+        {
+          "patient": "BraTS-PED-00046-000",
+          "2d": 0.9278,
+          "3d": 0.9144,
+          "rstar": 0.9176
+        },
+        {
+          "patient": "BraTS-PED-00047-000",
+          "2d": 0.7822,
+          "3d": 0.8065,
+          "rstar": 0.8232
+        },
+        {
+          "patient": "BraTS-PED-00049-000",
+          "2d": 0.5822,
+          "3d": 0.6088,
+          "rstar": 0.6162
+        },
+        {
+          "patient": "BraTS-PED-00051-000",
+          "2d": 0.5529,
+          "3d": 0.7088,
+          "rstar": 0.6113
+        },
+        {
+          "patient": "BraTS-PED-00053-000",
+          "2d": 0.7974,
+          "3d": 0.76,
+          "rstar": 0.7896
+        },
+        {
+          "patient": "BraTS-PED-00054-000",
+          "2d": 0.9711,
+          "3d": 0.9491,
+          "rstar": 0.9551
+        },
+        {
+          "patient": "BraTS-PED-00056-000",
+          "2d": 0.9095,
+          "3d": 0.8631,
+          "rstar": 0.8824
+        },
+        {
+          "patient": "BraTS-PED-00069-000",
+          "2d": 0.9168,
+          "3d": 0.8939,
+          "rstar": 0.8952
+        },
+        {
+          "patient": "BraTS-PED-00071-000",
+          "2d": 0.6398,
+          "3d": 0.6185,
+          "rstar": 0.6278
+        },
+        {
+          "patient": "BraTS-PED-00072-000",
+          "2d": 0.9454,
+          "3d": 0.9224,
+          "rstar": 0.9238
+        },
+        {
+          "patient": "BraTS-PED-00075-000",
+          "2d": 0.5914,
+          "3d": 0.5813,
+          "rstar": 0.5858
+        },
+        {
+          "patient": "BraTS-PED-00092-000",
+          "2d": 0.4616,
+          "3d": 0.5142,
+          "rstar": 0.5048
+        },
+        {
+          "patient": "BraTS-PED-00093-000",
+          "2d": 0.7153,
+          "3d": 0.6281,
+          "rstar": 0.725
+        },
+        {
+          "patient": "BraTS-PED-00099-000",
+          "2d": 0.5427,
+          "3d": 0.8148,
+          "rstar": 0.8318
+        },
+        {
+          "patient": "BraTS-PED-00108-000",
+          "2d": 0.64,
+          "3d": 0.6421,
+          "rstar": 0.6097
+        },
+        {
+          "patient": "BraTS-PED-00116-000",
+          "2d": 0.9398,
+          "3d": 0.9299,
+          "rstar": 0.9297
+        },
+        {
+          "patient": "BraTS-PED-00121-000",
+          "2d": 0.8778,
+          "3d": 0.9159,
+          "rstar": 0.9086
+        },
+        {
+          "patient": "BraTS-PED-00125-000",
+          "2d": 0.5464,
+          "3d": 0.4185,
+          "rstar": 0.5509
+        },
+        {
+          "patient": "BraTS-PED-00156-000",
+          "2d": 0.1859,
+          "3d": 0.5092,
+          "rstar": 0.5533
+        },
+        {
+          "patient": "BraTS-PED-00158-000",
+          "2d": 0.936,
+          "3d": 0.9495,
+          "rstar": 0.9643
+        },
+        {
+          "patient": "BraTS-PED-00165-000",
+          "2d": 0.9188,
+          "3d": 0.879,
+          "rstar": 0.9114
+        },
+        {
+          "patient": "BraTS-PED-00168-000",
+          "2d": 0.7051,
+          "3d": 0.7099,
+          "rstar": 0.7227
+        },
+        {
+          "patient": "BraTS-PED-00174-000",
+          "2d": 0.4874,
+          "3d": 0.841,
+          "rstar": 0.8319
+        },
+        {
+          "patient": "BraTS-PED-00183-000",
+          "2d": 0.6185,
+          "3d": 0.9352,
+          "rstar": 0.9591
+        },
+        {
+          "patient": "BraTS-PED-00186-000",
+          "2d": 0.9712,
+          "3d": 0.9449,
+          "rstar": 0.9502
+        },
+        {
+          "patient": "BraTS-PED-00188-000",
+          "2d": 0.0009,
+          "3d": 0.4517,
+          "rstar": 0.2524
+        },
+        {
+          "patient": "BraTS-PED-00189-000",
+          "2d": 0.9353,
+          "3d": 0.8747,
+          "rstar": 0.9229
+        },
+        {
+          "patient": "BraTS-PED-00190-000",
+          "2d": 0.9581,
+          "3d": 0.8885,
+          "rstar": 0.933
+        },
+        {
+          "patient": "BraTS-PED-00191-000",
+          "2d": 0.646,
+          "3d": 0.7397,
+          "rstar": 0.6279
+        },
+        {
+          "patient": "BraTS-PED-00196-000",
+          "2d": 0.8989,
+          "3d": 0.8251,
+          "rstar": 0.8653
+        },
+        {
+          "patient": "BraTS-PED-00198-000",
+          "2d": 0.7811,
+          "3d": 0.7687,
+          "rstar": 0.7825
+        },
+        {
+          "patient": "BraTS-PED-00200-000",
+          "2d": 0.5402,
+          "3d": 0.5048,
+          "rstar": 0.5227
+        },
+        {
+          "patient": "BraTS-PED-00203-000",
+          "2d": 0.6332,
+          "3d": 0.6097,
+          "rstar": 0.9563
+        },
+        {
+          "patient": "BraTS-PED-00204-000",
+          "2d": 0.9064,
+          "3d": 0.905,
+          "rstar": 0.9444
+        },
+        {
+          "patient": "BraTS-PED-00205-000",
+          "2d": 0.6194,
+          "3d": 0.6083,
+          "rstar": 0.6303
+        },
+        {
+          "patient": "BraTS-PED-00206-000",
+          "2d": 0.9343,
+          "3d": 0.8693,
+          "rstar": 0.9126
+        },
+        {
+          "patient": "BraTS-PED-00207-000",
+          "2d": 0.9557,
+          "3d": 0.9408,
+          "rstar": 0.9453
+        },
+        {
+          "patient": "BraTS-PED-00209-000",
+          "2d": 0.7734,
+          "3d": 0.9432,
+          "rstar": 0.9333
+        },
+        {
+          "patient": "BraTS-PED-00212-000",
+          "2d": 0.9821,
+          "3d": 0.9588,
+          "rstar": 0.9771
+        },
+        {
+          "patient": "BraTS-PED-00213-000",
+          "2d": 0.9779,
+          "3d": 0.9478,
+          "rstar": 0.9745
+        },
+        {
+          "patient": "BraTS-PED-00214-000",
+          "2d": 0.6268,
+          "3d": 0.6086,
+          "rstar": 0.6268
+        },
+        {
+          "patient": "BraTS-PED-00215-000",
+          "2d": 0.6392,
+          "3d": 0.9493,
+          "rstar": 0.9725
+        },
+        {
+          "patient": "BraTS-PED-00216-000",
+          "2d": 0.7168,
+          "3d": 0.8525,
+          "rstar": 0.8769
+        },
+        {
+          "patient": "BraTS-PED-00220-000",
+          "2d": 0.8705,
+          "3d": 0.8469,
+          "rstar": 0.8811
+        },
+        {
+          "patient": "BraTS-PED-00222-000",
+          "2d": 0.6008,
+          "3d": 0.6316,
+          "rstar": 0.9589
+        },
+        {
+          "patient": "BraTS-PED-00229-000",
+          "2d": 0.9777,
+          "3d": 0.9044,
+          "rstar": 0.9124
+        },
+        {
+          "patient": "BraTS-PED-00230-000",
+          "2d": 0.6583,
+          "3d": 0.6303,
+          "rstar": 0.6373
+        },
+        {
+          "patient": "BraTS-PED-00231-000",
+          "2d": 0.9367,
+          "3d": 0.8559,
+          "rstar": 0.9136
+        },
+        {
+          "patient": "BraTS-PED-00233-000",
+          "2d": 0.9806,
+          "3d": 0.9713,
+          "rstar": 0.9734
+        },
+        {
+          "patient": "BraTS-PED-00234-000",
+          "2d": 0.9711,
+          "3d": 0.9599,
+          "rstar": 0.9751
+        },
+        {
+          "patient": "BraTS-PED-00237-000",
+          "2d": 0.7588,
+          "3d": 0.7484,
+          "rstar": 0.7657
+        },
+        {
+          "patient": "BraTS-PED-00238-000",
+          "2d": 0.6218,
+          "3d": 0.5922,
+          "rstar": 0.5962
+        },
+        {
+          "patient": "BraTS-PED-00240-000",
+          "2d": 0.4657,
+          "3d": 0.8451,
+          "rstar": 0.847
+        },
+        {
+          "patient": "BraTS-PED-00241-000",
+          "2d": 0.9711,
+          "3d": 0.9516,
+          "rstar": 0.9528
+        },
+        {
+          "patient": "BraTS-PED-00242-000",
+          "2d": 0.7323,
+          "3d": 0.7698,
+          "rstar": 0.7776
+        },
+        {
+          "patient": "BraTS-PED-00245-000",
+          "2d": 0.6687,
+          "3d": 0.6217,
+          "rstar": 0.6262
+        },
+        {
+          "patient": "BraTS-PED-00246-000",
+          "2d": 0.6077,
+          "3d": 0.6046,
+          "rstar": 0.6171
+        },
+        {
+          "patient": "BraTS-PED-00247-000",
+          "2d": 0.624,
+          "3d": 0.9148,
+          "rstar": 0.9298
+        },
+        {
+          "patient": "BraTS-PED-00248-000",
+          "2d": 0.9008,
+          "3d": 0.7916,
+          "rstar": 0.8545
+        },
+        {
+          "patient": "BraTS-PED-00249-000",
+          "2d": 0.983,
+          "3d": 0.9529,
+          "rstar": 0.9701
+        },
+        {
+          "patient": "BraTS-PED-00252-000",
+          "2d": 0.6174,
+          "3d": 0.6038,
+          "rstar": 0.9555
+        },
+        {
+          "patient": "BraTS-PED-00254-000",
+          "2d": 0.8859,
+          "3d": 0.8201,
+          "rstar": 0.8735
+        },
+        {
+          "patient": "BraTS-PED-00257-000",
+          "2d": 0.9276,
+          "3d": 0.9047,
+          "rstar": 0.9423
+        },
+        {
+          "patient": "BraTS-PED-00259-000",
+          "2d": 0.9275,
+          "3d": 0.9185,
+          "rstar": 0.9201
+        },
+        {
+          "patient": "BraTS-PED-00260-000",
+          "2d": 0.979,
+          "3d": 0.9489,
+          "rstar": 0.9559
+        },
+        {
+          "patient": "BraTS-PED-00261-000",
+          "2d": 0.8937,
+          "3d": 0.8665,
+          "rstar": 0.885
+        },
+        {
+          "patient": "BraTS-PED-00262-000",
+          "2d": 0.628,
+          "3d": 0.7775,
+          "rstar": 0.7943
+        }
+      ]
+    }
+  }
+}

@@ -98,7 +98,24 @@ def load_patient_data(patient_id):
             
     return meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots, lbl_rstar_hires
 
+@st.cache_data
+def load_display_volume(patient_id):
+    """comparison_cache/<patient>/t1c.npz (add_display_images.py): uint8 T1c volume in the same frame as the labels."""
+    path = COMPARISON_CACHE / patient_id / "t1c.npz"
+    return np.load(path)["t1c"] if path.exists() else None
+
+
+@st.cache_data
+def load_expert(patient_id):
+    """comparison_cache/<patient>/expert.npz (add_display_images.py): the expert segmentation, 0-4."""
+    return np.load(COMPARISON_CACHE / patient_id / "expert.npz")["labels"]
+
+
 def get_background_slice(patient_id, slice_idx):
+    volume = load_display_volume(patient_id)
+    if volume is not None:
+        return volume[:, :, slice_idx].astype(np.float32)
+    # fallback: the older demo_cache slices (stored rotated 180 degrees relative to the labels)
     bg_path = DEMO_CACHE / patient_id / "axial" / f"slice_{slice_idx:03d}.npz"
     if bg_path.exists():
         img_arr = np.load(bg_path)["image"][0]
@@ -142,7 +159,7 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
 
     fig.update_layout(
         xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False, autorange='reversed'),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False, autorange='reversed', scaleanchor='x'),
         margin=dict(l=0, r=0, t=0, b=0),
         plot_bgcolor='black',
         paper_bgcolor='rgba(0,0,0,0)',
@@ -163,7 +180,10 @@ def main():
         st.error("Comparison cache directory not found or empty.")
         return
         
-    selected_patient = st.selectbox("Select Patient Record", patients)
+    # Open on a clean, typical result (all three models agree, R* best); failures are one click away.
+    default_patient = "BraTS-PED-00257-000"
+    selected_patient = st.selectbox("Select Patient Record", patients,
+                                    index=patients.index(default_patient) if default_patient in patients else 0)
     
     if selected_patient:
         meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots, lbl_rstar_hires = load_patient_data(selected_patient)
@@ -171,7 +191,7 @@ def main():
         status = meta.get("rstar_status", "unknown")
         warnings = meta.get("rstar_warnings", [])
         
-        st.markdown(f"**R* Pipeline Status:** <span class='badge-{'ok' if status == 'ok' else 'review'}'>{status.upper()}</span>", unsafe_allow_html=True)
+        st.markdown(f"**R\\* Pipeline Status:** <span class='badge-{'ok' if status == 'ok' else 'review'}'>{status.upper()}</span>", unsafe_allow_html=True)
         for w in warnings:
             st.warning(f"⚠️ **Warning:** {w}")
             
@@ -184,22 +204,28 @@ def main():
         
         demo_axial_dir = DEMO_CACHE / selected_patient / "axial"
         avail_bg_slices = []
-        if demo_axial_dir.exists():
+        full_image = load_display_volume(selected_patient) is not None
+        if not full_image and demo_axial_dir.exists():
             for f in demo_axial_dir.glob("slice_*.npz"):
                 try:
                     avail_bg_slices.append(int(f.stem.split('_')[1]))
                 except ValueError:
                     pass
                     
-        if avail_bg_slices:
-            min_bg = min(avail_bg_slices)
-            max_bg = max(avail_bg_slices)
-            default_slice = (min_bg + max_bg) // 2
-            bg_caption = f"ℹ️ Background MRI available for slices {min_bg}–{max_bg}. Other slices display on a black canvas."
+        avail_bg_slices = sorted(avail_bg_slices)
+        tumour_area = (lbl_rstar > 0).sum(axis=(0, 1))          # R* tumour voxels per axial slice
+        if full_image:
+            default_slice = int(tumour_area.argmax())
+            bg_caption = "ℹ️ Background: T1c (contrast-enhanced) MRI. Opens on the slice with the most tumour."
+        elif avail_bg_slices:
+            # demo_cache holds MRI images for only ~30 scattered slices; open on the imaged slice with most tumour
+            default_slice = max(avail_bg_slices, key=lambda z: tumour_area[z])
+            bg_caption = (f"ℹ️ MRI images exist for {len(avail_bg_slices)} slices of this patient "
+                          f"({avail_bg_slices[0]}–{avail_bg_slices[-1]}); other slices show the outlines on black.")
         else:
-            default_slice = max_slice // 2
-            bg_caption = "ℹ️ Background MRI unavailable for this demo record. Slices display on a black canvas."
-            
+            default_slice = int(tumour_area.argmax())
+            bg_caption = "ℹ️ No MRI image for this patient in the demo package; outlines are shown on black."
+
         # ─── DYNAMIC CONTROL PANEL LAYOUT ───
         layout = [2.5, 1]
         if has_review: layout.append(1)
@@ -208,12 +234,24 @@ def main():
         cols = st.columns(layout)
         
         with cols[0]:
-            slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, default_slice)
+            # keyed per patient so a new patient opens on its own default slice
+            only_imaged = bool(avail_bg_slices) and st.toggle("Only slices with an MRI image", value=True,
+                                                              key=f"only_imaged_{selected_patient}")
+            if only_imaged:
+                slice_idx = st.select_slider("Axial Slice Navigation", options=avail_bg_slices, value=default_slice,
+                                             key=f"slice_img_{selected_patient}")
+            else:
+                slice_idx = st.slider("Axial Slice Navigation", 0, max_slice, default_slice,
+                                      key=f"slice_{selected_patient}")
             st.caption(bg_caption)
             
         with cols[1]:
             st.write("") 
             show_mask = st.toggle("Overlay Segmentation", value=True)
+            expert_path = COMPARISON_CACHE / selected_patient / "expert.npz"
+            show_expert = expert_path.exists() and st.toggle("Expert segmentation", value=True,
+                                                             help="The expert's manual segmentation: the reference "
+                                                                  "every Dice number on this page is measured against.")
             
         idx = 2
         show_review = False
@@ -227,31 +265,52 @@ def main():
         if has_hires:
             with cols[idx]:
                 st.write("")
-                use_hires = st.toggle("✨ Hi-Res Mode", value=False)
+                use_hires = st.toggle("✨ Hi-Res Mode", value=False,
+                                      help="Research option: R* with its 3D part averaged from the 96³ and 160³ "
+                                           "families. Not the deployed model.")
                 
         bg_img = get_background_slice(selected_patient, slice_idx)
             
-        img_col1, img_col2, img_col3 = st.columns(3)
+        if show_expert:
+            img_col1, img_col2, img_col3, img_col4 = st.columns(4)
+        else:
+            img_col1, img_col2, img_col3 = st.columns(3)
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
         # Decide which R* label mask to display
         active_rstar_lbl = lbl_rstar_hires if use_hires else lbl_rstar
-        rstar_title = "R* (Hi-Res)" if use_hires else "R* (Fusion)"
+        rstar_title = "R* hi-res" if use_hires else "R*"
         
         with img_col1:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D Architecture</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D model</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
         with img_col2:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D Architecture</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D family</h4>", unsafe_allow_html=True)
             st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
         with img_col3:
             st.markdown(f"<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>{rstar_title}</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_plotly_viewer(bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice, show_review), use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
+            # flags were computed from the deployed R*, so they are only drawn on it, not on the hi-res option
+            st.plotly_chart(create_plotly_viewer(bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice,
+                                                 show_review and not use_hires),
+                            use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
+            if show_expert:
+                with img_col4:
+                    st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>Expert</h4>",
+                                unsafe_allow_html=True)
+                    expert = load_expert(selected_patient)
+                    st.plotly_chart(create_plotly_viewer(bg_img, expert[:, :, slice_idx], show_mask, None, False),
+                                    use_container_width=True, config={'displayModeBar': False}, key="viewer_expert")
+            if use_hires and has_review and show_review:
+                st.caption("Flagged spots belong to the deployed R*; switch Hi-Res Mode off to see them.")
+
+        st.caption("Colours: red = enhancing tumour (ET) · green = non-enhancing core · blue = cyst · "
+                   "yellow = oedema · magenta = spot flagged for review (R* panel only). "
+                   "Tumour core (TC) = red + green + blue; whole tumour (WT) = all four.")
 
         if has_review:
             st.markdown(f"""
             <div class="review-alert">
-                <div class="review-title">🟣 {len(review_spots)} spots flagged for review</div>
+                <div class="review-title">🟣 {len(review_spots)} {"spot" if len(review_spots) == 1 else "spots"} flagged for review</div>
                 <div class="review-desc">Flagged spots are areas the model is unsure about and are meant for expert review, not a diagnosis.</div>
             </div>
             """, unsafe_allow_html=True)
@@ -278,17 +337,37 @@ def main():
                 }
             )
 
+            # Jump to a flagged spot: on_click runs before the next rerun, the only point where a drawn
+            # slider's value may be changed. Flagged spots often sit on slices without an MRI image,
+            # so the jump also switches to the full slice range.
+            def _go_to_spot(z):
+                st.session_state[f"only_imaged_{selected_patient}"] = False
+                st.session_state[f"slice_{selected_patient}"] = z
+
+            spot_cols = st.columns(min(len(review_spots), 6))
+            for i, spot in enumerate(review_spots):
+                zs = np.where((review_mask == spot["spot_id"]).any(axis=(0, 1)))[0]
+                if len(zs) == 0:
+                    continue
+                mid = int(zs[np.argmax([(review_mask[:, :, z] == spot["spot_id"]).sum() for z in zs])])
+                spot_cols[i % len(spot_cols)].button(f"Go to spot {spot['spot_id']} (slice {mid})",
+                                                     key=f"goto_{selected_patient}_{spot['spot_id']}",
+                                                     on_click=_go_to_spot, args=(mid,))
+
         st.divider()
         
-        st.markdown("<h3 style='font-family: Outfit, sans-serif; color: #0F172A;'>📊 Multi-Model Performance Comparison</h3>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='font-family: Outfit, sans-serif; color: #0F172A;'>📊 Accuracy for this patient "
+                    f"({selected_patient})</h3>", unsafe_allow_html=True)
         
         # Display the research note if Hi-Res is active
         if use_hires and "rstar_hires_note" in meta:
             st.caption(f"🔬 **Research Option Active:** {meta['rstar_hires_note']}")
         else:
-            st.caption("Dice similarity coefficient per region across all architectures.")
+            st.caption("Dice per tumour region for the selected patient only (1 = perfect overlap with the expert). "
+                       "Overall results across all test patients are on the Dashboard page.")
         
-        regions = ["ET", "NC", "WT"]
+        regions = ["ET", "NC", "WT"]                      # meta.json key "NC" is the tumour core (labels 1-3)
+        region_label = {"ET": "ET", "NC": "TC", "WT": "WT"}   # shown as TC, the standard name, as on the Dashboard
         metrics_2d = meta.get("regions", {}).get("2d", {})
         metrics_3d = meta.get("regions", {}).get("3d", {})
         
@@ -306,13 +385,13 @@ def main():
             st.markdown("**2D Baseline**")
             for r in regions:
                 val = metrics_2d.get(r, {}).get("dice", "N/A")
-                st.metric(label=f"{r} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
+                st.metric(label=f"{region_label[r]} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
                 
         with met_col2:
             st.markdown("**3D Family**")
             for r in regions:
                 val = metrics_3d.get(r, {}).get("dice", "N/A")
-                st.metric(label=f"{r} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
+                st.metric(label=f"{region_label[r]} Dice", value=f"{val:.4f}" if isinstance(val, float) else val)
                 
         with met_col3:
             st.markdown(col_3_title, unsafe_allow_html=True)
@@ -321,9 +400,9 @@ def main():
                 val_2d = metrics_2d.get(r, {}).get("dice", 0.0)
                 
                 if isinstance(val_rstar, float) and isinstance(val_2d, float):
-                    st.metric(label=f"{r} Dice", value=f"{val_rstar:.4f}", delta=f"{(val_rstar - val_2d):.4f} vs 2D")
+                    st.metric(label=f"{region_label[r]} Dice", value=f"{val_rstar:.4f}", delta=f"{(val_rstar - val_2d):.4f} vs 2D")
                 else:
-                    st.metric(label=f"{r} Dice", value=val_rstar)
+                    st.metric(label=f"{region_label[r]} Dice", value=val_rstar)
 
 if __name__ == "__main__":
     main()

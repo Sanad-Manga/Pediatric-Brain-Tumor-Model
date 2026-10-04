@@ -138,9 +138,13 @@ st.markdown("""
             <div class="tl-title">Phase 4 — Domain Adaptation</div>
             <div class="tl-desc">CORAL alignment and feature-space visualizations implemented for future cross-institutional studies.</div>
         </div>
+        <div class="tl-item"><div class="tl-dot"></div>
+            <div class="tl-title">Phase 5 — Research Demo</div>
+            <div class="tl-desc">Deployment of this Streamlit app featuring segmentation overlays and PDF export, running the 2D ensemble (0.754 held-out mean Dice).</div>
+        </div>
         <div class="tl-item" style="margin-bottom:0"><div class="tl-dot"></div>
-            <div class="tl-title">Phase 5 — Research Demo (Current)</div>
-            <div class="tl-desc">Deployment of this Streamlit app featuring segmentation overlays and PDF export. Final model: Ensemble achieving 0.754 held-out mean Dice.</div>
+            <div class="tl-title">Phase 6 — R* (Current)</div>
+            <div class="tl-desc">R* combines the 2D ensemble with a family of four 3D models: 0.805 mean Dice on 30 never-seen test patients (2D alone 0.711, 3D alone 0.747), 0.810 on the 81 held-out patients. Compared side by side on the Model Comparison page.</div>
         </div>
     </div>
 </div>

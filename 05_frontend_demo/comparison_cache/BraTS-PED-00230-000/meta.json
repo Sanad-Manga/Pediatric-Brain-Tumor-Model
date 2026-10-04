@@ -65,16 +65,16 @@
         "recall": 0.0
       },
       "NC": {
-        "dice": 0.9608,
-        "precision": 0.931,
-        "recall": 0.9925
+        "dice": 0.9597,
+        "precision": 0.9286,
+        "recall": 0.9929
       },
       "WT": {
-        "dice": 0.9608,
-        "precision": 0.931,
-        "recall": 0.9925
+        "dice": 0.9597,
+        "precision": 0.9286,
+        "recall": 0.9929
       }
     }
   },
-  "rstar_hires_note": "Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family. Better on both test sets in a saved-output test (held-out 0.814 vs 0.810, fresh-30 0.815 vs 0.805, no extra false enhancing tumour); needs cross-validation before it can replace R*."
+  "rstar_hires_note": "Research option, not the deployed model: R* with its 3D part averaged from the deployed 96^3 family and two independently trained 160^3 families. In a saved-output test it beat R* on both test sets with no extra false enhancing tumour (held-out 0.813 vs 0.810, clean test 0.816 vs 0.805), but the gain is small and the idea was formed on those same sets; it needs cross-validation before it can replace R*."
 }
