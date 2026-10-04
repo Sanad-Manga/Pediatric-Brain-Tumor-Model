@@ -37,7 +37,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 
 - **Fragment cleanup (Addendum 3):**
   - `RStarConfig` gains `fragment_cleanup: bool = False` and `cleanup_min_voxels: int = 200`.
-  - New `fusion.remove_fragments(labels, min_voxels)` -> new array: every 26-connected component of the whole-tumour mask (labels 1-4) with fewer than `min_voxels` voxels becomes 0; then every 26-connected component of the remaining enhancing tumour (label 1) with fewer than `min_voxels` voxels becomes 2. Other labels and the input are unchanged; `min_voxels = 0` returns an equal copy.
+  - New `fusion.remove_fragments(labels, min_voxels)` -> `(new labels, whole-tumour voxels removed, ET voxels relabelled)`, in the style of `apply_small_et_rule`: every 26-connected component of the whole-tumour mask (labels 1-4) with fewer than `min_voxels` voxels becomes 0; then every 26-connected component of the remaining enhancing tumour (label 1) with fewer than `min_voxels` voxels becomes 2. Other labels and the input are unchanged; `min_voxels = 0` returns an equal copy and zero counts.
   - When `fragment_cleanup` is true, `segment` applies it to the fused labels (R* mode) or the 3D argmax (3D-only mode) **after** review flags are computed and **before** the 500 mm³ rule; `diagnostics` gains `fragment_voxels_removed` (whole-tumour voxels set to background) and `et_fragment_voxels_relabelled` only when it is on.
   - CLI: `--fragment-cleanup` turns it on.
 
@@ -90,9 +90,9 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 35. CLI: `--review-mask out.nii.gz` with a stub segmenter writes a uint8 NIfTI equal to `review_mask` with the input affine, the `--json` report contains `review_spots` equal to the result's list, and without `--review-mask` no review file is written, the JSON has no `review_spots` key, and the segmenter was built with `review_flags=False`.
 36. Real-data check (slow, skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): for three of the 14 demo patients, the flagged spots' count and reasons equal, and each spot's voxel count is within 1% of, those in `05_frontend_demo/comparison_cache/<patient>/review_spots.json` (written by `add_review_flags.py` with the same rule), and `mean_et_prob` within 0.01. README documents the option, the rule, its source study and that flags do not change the labels.
 37. Config: `RStarConfig().fragment_cleanup is False` and `cleanup_min_voxels == 200`; a non-bool `fragment_cleanup`, or a negative, non-integer or bool `cleanup_min_voxels`, raises `ValueError` naming the field.
-38. `remove_fragments` on hand-built volumes: a whole-tumour component of `min_voxels - 1` voxels becomes 0 and one of exactly `min_voxels` is kept; an ET component below `min_voxels` inside a large tumour becomes 2 while the rest of that tumour is unchanged; two blocks touching only at a corner count as one component; the input array is not modified and the output dtype equals the input dtype; `min_voxels = 0` returns an array equal to the input.
+38. `remove_fragments` on hand-built volumes: a whole-tumour component of `min_voxels - 1` voxels becomes 0 and one of exactly `min_voxels` is kept; an ET component below `min_voxels` inside a large tumour becomes 2 while the rest of that tumour is unchanged; two blocks touching only at a corner count as one component; the input array is not modified and the output dtype equals the input dtype; `min_voxels = 0` returns an array equal to the input and zero counts; the two counts equal the voxels changed.
 39. Off by default: with stub probabilities, `segment` with the default config returns labels identical to the labels computed without any cleanup and has no `fragment_voxels_removed` or `et_fragment_voxels_relabelled` key.
-40. On: `segment` with `fragment_cleanup=True` returns labels equal to `apply_small_et_rule(remove_fragments(pre_rule_labels, cleanup_min_voxels))`, in R* and 3D-only modes; the two diagnostics equal the voxel counts actually changed; with `review_flags=True` as well, `review_mask` and `review_spots` are identical to those with cleanup off.
+40. On: `segment` with `fragment_cleanup=True` returns labels equal to `apply_small_et_rule(remove_fragments(pre_rule_labels, cleanup_min_voxels)[0])`, in R* and 3D-only modes; the two diagnostics equal the voxel counts actually changed; with `review_flags=True` as well, `review_mask` and `review_spots` are identical to those with cleanup off.
 41. Order: on a stub case where removing an ET fragment brings the total ET below 500 mm³, the remaining ET is relabelled by the 500 mm³ rule (cleanup runs first) and `et_relabelled` is true.
 42. CLI: `--fragment-cleanup` builds the segmenter with `fragment_cleanup=True` (and an injected segmenter gets it set); without the option it is built with `fragment_cleanup=False`.
 43. Real data and docs (slow part skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): on three fresh-30 patients, `fragment_cleanup=True` changes the per-patient mean legacy Dice (ET, TC, WT; rule applied) by no more than 0.01 against cleanup off, and never leaves a whole-tumour component smaller than `cleanup_min_voxels`. README documents the option, the size, its source tests, and that it is off by default pending cross-validation.
@@ -215,18 +215,18 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [ ] Req 26: today's rule as decisions matches `fusion.apply_small_et_rule` scoring below, at and above threshold
 - [ ] Req 27: dtype tolerance, invalid probabilities and mismatched masks rejected, edge spots, determinism
 - [ ] Req 28: only the new module, its tests and SPEC.md change; pipeline does not import it; existing tests pass unedited
-- [ ] Req 29: review-flag config defaults and validation
-- [ ] Req 30: flags off by default; no review fields
-- [ ] Req 31: labels, mode, status, warnings, diagnostics identical with flags on and off (R*, 3D-only, rule firing)
-- [ ] Req 32: exactly the low-confidence large spot flagged, values exact, mask exact, count in diagnostics
-- [ ] Req 33: spots erased by the 500 mm³ rule can still be flagged
-- [ ] Req 34: thresholds respected, boundary not flagged
-- [ ] Req 35: CLI --review-mask writes the mask and JSON spots; nothing extra without it
-- [ ] Req 36: real-data flags match the demo package (slow); README documents the option
-- [ ] Req 37: fragment-cleanup config defaults and validation
-- [ ] Req 38: remove_fragments exact on hand-built volumes (boundary, ET inside tumour, corner, no mutation, dtype, 0 = identity)
-- [ ] Req 39: off by default; labels unchanged; no cleanup diagnostics
-- [ ] Req 40: on = rule(remove_fragments(pre)) in both modes; diagnostics exact; flags unchanged by cleanup
-- [ ] Req 41: cleanup runs before the 500 mm³ rule
-- [ ] Req 42: CLI --fragment-cleanup
-- [ ] Req 43: real-data Dice change <= 0.01 and no small components left (slow); README documents the option
+- [x] Req 29: review-flag config defaults and validation
+- [x] Req 30: flags off by default; no review fields
+- [x] Req 31: labels, mode, status, warnings, diagnostics identical with flags on and off (R*, 3D-only, rule firing)
+- [x] Req 32: exactly the low-confidence large spot flagged, values exact, mask exact, count in diagnostics
+- [x] Req 33: spots erased by the 500 mm³ rule can still be flagged
+- [x] Req 34: thresholds respected, boundary not flagged
+- [x] Req 35: CLI --review-mask writes the mask and JSON spots; nothing extra without it
+- [x] Req 36: real-data flags match the demo package (slow); README documents the option
+- [x] Req 37: fragment-cleanup config defaults and validation
+- [x] Req 38: remove_fragments exact on hand-built volumes (boundary, ET inside tumour, corner, no mutation, dtype, 0 = identity)
+- [x] Req 39: off by default; labels unchanged; no cleanup diagnostics
+- [x] Req 40: on = rule(remove_fragments(pre)) in both modes; diagnostics exact; flags unchanged by cleanup
+- [x] Req 41: cleanup runs before the 500 mm³ rule
+- [x] Req 42: CLI --fragment-cleanup
+- [x] Req 43: real-data Dice change <= 0.01 and no small components left (slow); README documents the option

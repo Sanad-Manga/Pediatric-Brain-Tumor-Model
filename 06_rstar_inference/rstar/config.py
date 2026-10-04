@@ -31,6 +31,8 @@ class RStarConfig:
     review_flags: bool = False             # also return enhancing-tumour spots to review (SPEC Addendum 2); labels unchanged
     review_prob_cut: float = 0.7           # flag a spot whose mean ET probability is below this (pre-registered study, 2026-10-02)
     review_min_voxels: int = 50            # spots smaller than this are neither kept nor flagged
+    fragment_cleanup: bool = False         # remove tiny tumour fragments before the 500 mm^3 rule (SPEC Addendum 3)
+    cleanup_min_voxels: int = 200          # chosen on held-out (PREREGISTERED_fragments_hybrid_2026-10-04); needs CV
     models_root: Path | None = None        # where the (untracked) checkpoints live; default: env RSTAR_MODELS_ROOT, else the repo root
     manifest_path: Path | None = None
 
@@ -60,6 +62,10 @@ class RStarConfig:
             raise ValueError(f"review_prob_cut must be in [0, 1], got {self.review_prob_cut!r}")
         if isinstance(self.review_min_voxels, bool) or not isinstance(self.review_min_voxels, int) or self.review_min_voxels < 0:
             raise ValueError(f"review_min_voxels must be a non-negative integer, got {self.review_min_voxels!r}")
+        if not isinstance(self.fragment_cleanup, bool):
+            raise ValueError(f"fragment_cleanup must be True or False, got {self.fragment_cleanup!r}")
+        if isinstance(self.cleanup_min_voxels, bool) or not isinstance(self.cleanup_min_voxels, int) or self.cleanup_min_voxels < 0:
+            raise ValueError(f"cleanup_min_voxels must be a non-negative integer, got {self.cleanup_min_voxels!r}")
         shape = tuple(self.expected_shape)
         if len(shape) != 3 or any(int(s) != s or s < 1 for s in shape):
             raise ValueError(f"expected_shape must be three positive integers, got {self.expected_shape!r}")

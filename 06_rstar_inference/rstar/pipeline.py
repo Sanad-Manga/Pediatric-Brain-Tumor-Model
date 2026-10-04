@@ -135,6 +135,11 @@ class RStarSegmenter:
             et_prob = p3[1] if mode == "3D-only" else self.cfg.w3d * p3[1] + (1.0 - self.cfg.w3d) * p2[1]
             review_mask, review_spots = self._review_flags(labels, np.clip(et_prob, 0.0, 1.0))
 
+        cleanup = None
+        if self.cfg.fragment_cleanup:                       # after the flags (they see everything), before the 500 mm^3 rule
+            labels, wt_removed, et_cleaned = fusion.remove_fragments(labels, self.cfg.cleanup_min_voxels)
+            cleanup = {"fragment_voxels_removed": wt_removed, "et_fragment_voxels_relabelled": et_cleaned}
+
         labels, et_before, relabelled = fusion.apply_small_et_rule(
             labels, self.cfg.et_min_mm3, self.cfg.voxel_mm3 if voxel_mm3 is None else voxel_mm3)
         diagnostics = {
@@ -148,6 +153,8 @@ class RStarSegmenter:
         }
         if review_spots is not None:
             diagnostics["review_spot_count"] = len(review_spots)
+        if cleanup is not None:
+            diagnostics.update(cleanup)
         return RStarResult(labels=labels.astype(np.uint8), mode=mode, status=status, warnings=warnings, diagnostics=diagnostics,
                            review_mask=review_mask, review_spots=review_spots)
 
