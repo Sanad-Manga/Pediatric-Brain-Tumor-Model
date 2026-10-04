@@ -60,21 +60,21 @@
     },
     "rstar_hires": {
       "ET": {
-        "dice": 0.3879,
-        "precision": 0.523,
-        "recall": 0.3083
+        "dice": 0.3934,
+        "precision": 0.5449,
+        "recall": 0.3078
       },
       "NC": {
-        "dice": 0.2906,
-        "precision": 0.9529,
-        "recall": 0.1714
+        "dice": 0.299,
+        "precision": 0.9571,
+        "recall": 0.1772
       },
       "WT": {
-        "dice": 0.7385,
-        "precision": 0.9905,
-        "recall": 0.5887
+        "dice": 0.7319,
+        "precision": 0.9904,
+        "recall": 0.5805
       }
     }
   },
-  "rstar_hires_note": "Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family. Promising but not confirmed: retrained from scratch, it beat R* on the 30-patient clean test both times (+0.010, +0.012) but not on the 81 held-out patients the second time (+0.004, then -0.001); it needs cross-validation before it can replace R*."
+  "rstar_hires_note": "Research option, not the deployed model: R* with its 3D part averaged from the deployed 96^3 family and two independently trained 160^3 families. In a saved-output test it beat R* on both test sets with no extra false enhancing tumour (held-out 0.813 vs 0.810, clean test 0.816 vs 0.805), but the gain is small and the idea was formed on those same sets; it needs cross-validation before it can replace R*."
 }
