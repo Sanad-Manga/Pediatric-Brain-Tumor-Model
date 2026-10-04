@@ -2,6 +2,8 @@
 
 > **Addendum 1 (2026-10-02) — spot-level review flags and the error scorecard (team decisions Q1 = C, Q2 = D):** §2, §3, §4 (Req 22-28), §5, §6 and §7 were extended. This is a *forward* plan. The bio-tech doctor said missed and false enhancing tumour (ET) are both unacceptable, and that uncertain areas may be flagged for (biopsy) review. Today the 500 mm³ rule silently relabels all predicted ET as non-enhancing when a patient's total ET is small: on 81 held-out patients it removes 24 real small ET spots to remove 46 false ones, and this week every 30-patient comparison was decided by a few 500-1,000 voxel false ET spots that survived it. This addendum adds a **standalone** module that splits predicted ET into separate spots, describes each (size, confidence, agreement between the model sources) and marks each spot `keep` or `review`; plus a scorecard that counts errors per spot, including **silent** errors (a false spot kept, or a real lesion not covered by any kept or review spot). It is **not wired into `RStarSegmenter`** (the deployed pipeline and its outputs are unchanged); integration is a later, evidence-gated step. The "uncertainty" out-of-scope line of §3 is narrowed accordingly: spot-level review flags from fixed, documented thresholds are in scope; learned or calibrated confidence remains out of scope.
 >
+> **Addendum 2 (2026-10-04) - review flags wired into `RStarSegmenter`, off by default:** §2, §3, §4 (Req 29-36), §5, §6 and §7 were extended. The pre-registered review-flag study (2026-10-02) chose the rule *flag every enhancing-tumour spot of at least 50 voxels whose mean ET probability is below 0.7* (fresh-30: silent false spots 3 -> 0, silently missed lesions 4 -> 3 of 21, 0.5 spots to review per patient). The team decided to integrate it after Oct 6 as its own reviewed step; this addendum is that step. Flags are **added information only**: with flags on or off the labels, mode, status, warnings and existing diagnostics are identical, so the deployed output does not change. It supersedes Addendum 1's out-of-scope line "Wiring review flags into `RStarSegmenter`, its CLI or its outputs" and the clause of Req 28 that `pipeline.py` does not import `review_flags`.
+>
 ## 1. Goal
 A standalone, guard-railed Python package (`rstar`) that segments one co-registered BraTS-space pediatric brain MRI with the 2D+3D fusion recipe measured on 2026-09-26 (0.805 mean Dice on 30 patients that were never used to train or choose anything, against 0.711 for the shipped 2D ensemble), and fails loudly, not silently, when its inputs or its own geometry are wrong.
 
@@ -25,6 +27,12 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
   - `score_patient(spot_ids, spots, decisions, gt_labels)` -> dict: GT lesions = 26-connected components of `gt_labels == 1`. Per predicted spot: real if it overlaps GT ET, else false. Per GT lesion: `caught_keep` if it overlaps a kept spot, else `caught_review` if it overlaps a review spot, else `missed`. Returns integer counts `kept_real`, `kept_false`, `review_real`, `review_false`, `lesions`, `lesions_caught_keep`, `lesions_caught_review`, `lesions_missed`, plus `silent_false = kept_false`, `silent_missed = lesions_missed`, and `et_dice_kept` (ET Dice with only kept spots as ET) and `et_dice_with_review` (kept + review as ET), each 1.0 when both prediction and truth are empty.
   - `t500_decisions(spots, total_et_voxels, voxel_mm3=1.0, min_mm3=500.0)` -> today's rule expressed as decisions: every spot `keep` if `total_et_voxels * voxel_mm3 >= min_mm3`, else every spot `"drop"` (relabelled away, i.e. neither kept nor reviewed). `score_patient` accepts `"drop"` and treats a dropped spot as absent.
 
+- **Review flags in the pipeline (Addendum 2):**
+  - `RStarConfig` gains `review_flags: bool = False`, `review_prob_cut: float = 0.7` and `review_min_voxels: int = 50`.
+  - When `review_flags` is true, `segment` also computes flags from the **pre-rule** labels (the fused labels before `apply_small_et_rule`; in 3D-only mode the 3D argmax) and the enhancing-tumour probability of the same branch (`w3d * p3[1] + (1 - w3d) * p2[1]` in R* mode, `p3[1]` in 3D-only mode, clipped to [0, 1]): `find_et_spots` with no source masks, spots with fewer than `review_min_voxels` voxels discarded (neither kept nor flagged), `decide(big_spots, size_cut=0, prob_cut=review_prob_cut, agree_cut=0.0, small_cut=0)`, then `review_outputs`.
+  - `RStarResult` gains `review_mask` (uint8, the input's spatial shape, 0 = not flagged, k = flagged spot k) and `review_spots` (the issue #44 list); both are `None` when flags are off. `diagnostics` gains `review_spot_count` only when flags are on.
+  - CLI: `--review-mask PATH` turns flags on, writes the review mask as a uint8 NIfTI with the input affine, and adds `review_spots` to the `--json` report.
+
 ## 3. Out of Scope
 - Registration, skull-stripping, resampling to BraTS space, DICOM I/O, NIfTI header repair.
 - Any change to sections 01, 03 or 05 (`05_frontend_demo` is not touched; a later integration step is the maintainers' call).
@@ -32,6 +40,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - Uncertainty calibration or a learned confidence score. The agreement flag is a weak soft signal only; the module never withholds labels because of low agreement (one genuine 2D collapse on a correctly aligned held-out patient had agreement 0.000).
 - **Any claim of clinical validity or of performance on non-US data.** Reported numbers are US BraTS-PEDs only.
 - Bundling checkpoints into the repository.
+- **(Addendum 2)** Changing the labels, status or warnings because of flags; per-spot model agreement inside the pipeline (it would need four extra 3D passes; the chosen rule does not use it, so `models_agree` is `null`); flags on by default; any change to `05_frontend_demo` or the deployed comparison package; the CLI writing flags without being asked.
 - **(Addendum 1)** Wiring review flags into `RStarSegmenter`, its CLI or its outputs; any change to existing `rstar` modules, the deployed models or the Oct-6 comparison package; choosing threshold values in code (evaluation runs pass them explicitly; defaults exist only as documented keyword defaults where stated); learned/calibrated uncertainty; any evaluation script with data paths (those live outside the repository); the Streamlit display (issue #44).
 
 ## 4. Requirements
@@ -63,6 +72,14 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 25. Scorecard: on a hand-built patient with a known mix (a kept real spot, a kept false spot, a review real spot, a review false spot, a GT lesion covered by nothing, a GT lesion covered only by a review spot), every count returned by `score_patient` is exact, `silent_false == kept_false`, `silent_missed == lesions_missed`, and both Dice values equal hand-computed values (1e-9); an ET-free patient with no spots gives Dice 1.0 for both and all counts 0.
 26. Today's rule: `t500_decisions` drops every spot when total ET is below 500 mm³ (respecting `voxel_mm3`) and keeps every spot otherwise (exactly 500 keeps), and `score_patient` with those decisions gives the same `et_dice_kept` as scoring the labels produced by the existing `fusion.apply_small_et_rule` on the same volume (1e-9), for at least a below-threshold, an at-threshold and an above-threshold case.
 27. Robustness: integer, boolean or float `labels`/`gt_labels` arrays of the same shape are accepted; `et_prob` outside [0, 1] or with NaN raises `ValueError`; source masks of another shape raise `ValueError`; a spot touching the volume edge is handled; everything is deterministic.
+29. Config: `RStarConfig().review_flags is False`, `review_prob_cut == 0.7`, `review_min_voxels == 50`; `review_prob_cut` outside [0, 1] or NaN, a negative or non-integer `review_min_voxels`, or a non-bool `review_flags` raise `ValueError` naming the field.
+30. Off by default and unchanged: with stub models on a tiny synthetic volume, `segment` with default config gives `review_mask is None`, `review_spots is None`, no `review_spot_count` key, and the same diagnostics keys as Req 14.
+31. Labels never change: for the same inputs, `segment` with `review_flags=True` returns labels, mode, status, warnings and every Req 14 diagnostics value except `elapsed_s` identical to `review_flags=False`, in R* mode and in 3D-only mode, including a case where the 500 mm³ rule relabels all ET.
+32. Flag content: with controllable stubs that produce (a) a large confident ET blob, (b) a large low-probability ET blob, (c) a low-probability blob below `review_min_voxels`, the result flags exactly (b): `review_spots` has one entry with `voxels` equal to (b)'s voxel count, `mean_et_prob` equal to the fused ET probability averaged over (b) (1e-6), `reason == "low_confidence"`, `models_agree is None`, and `review_mask` is 1 exactly on (b)'s voxels and 0 elsewhere; `diagnostics["review_spot_count"] == 1`.
+33. Pre-rule source: when the 500 mm³ rule relabels a patient's whole ET to non-enhancing, a low-probability spot of at least `review_min_voxels` voxels is still flagged (the flag sees the ET the rule erased).
+34. Thresholds respected: raising `review_prob_cut` above (a)'s mean probability flags (a) too; setting `review_min_voxels` to 1 flags (c) too; a spot exactly at `review_prob_cut` is not flagged.
+35. CLI: `--review-mask out.nii.gz` with a stub segmenter writes a uint8 NIfTI equal to `review_mask` with the input affine, the `--json` report contains `review_spots` equal to the result's list, and without `--review-mask` no review file is written, the JSON has no `review_spots` key, and the segmenter was built with `review_flags=False`.
+36. Real-data check (slow, skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): for three of the 14 demo patients, the flagged spots' count, voxel counts and reasons equal those in `05_frontend_demo/comparison_cache/<patient>/review_spots.json` (written by `add_review_flags.py` with the same rule), and `mean_et_prob` within 0.01. README documents the option, the rule, its source study and that flags do not change the labels.
 28. Isolation and regression: the only changed or new files are `rstar/review_flags.py`, `tests/test_review_flags.py` and `SPEC.md`; every other file in `06_rstar_inference/` is byte-identical; `rstar/pipeline.py` does not import `review_flags`; every pre-existing `06_rstar_inference` test passes unedited.
 
 **Assumption:** The negative-voxel limits (1% warn, 5% error) were set after the regression run showed that real BraTS-PEDs scans do contain negative voxels (0.03-0.47% in the four sequences of one fresh patient); the first draft of this spec wrongly rejected any negative value.
@@ -72,6 +89,9 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 **Assumption:** The module returns a single case per call, on one device, in float32; memory use is a full-resolution five-class probability volume per branch (about 180 MB each at 240×240×155).
 **Assumption:** Voxel volume is 1 mm³ for the BraTS grid; the mm³ form of the 500-voxel rule is the same rule expressed in physical units.
 
+**Assumption (Addendum 2):** Flags leave `status` alone: a flagged spot is information for the reader, and tying it to `'review'` would change the deployed output and make most patients `'review'` (about 0.5 flagged spots per patient on fresh-30).
+**Assumption (Addendum 2):** `models_agree` is `null` in the pipeline: the chosen rule ignores agreement, and computing it needs one extra 3D pass per member. `add_review_flags.py` (demo package) computed it; that is why Req 36 compares everything but agreement.
+**Assumption (Addendum 2):** Specks under 50 voxels are dropped from the flag list, as in the study's amended scorecard; whether the tool should show them is still an open team question.
 **Assumption (Addendum 1):** "Agreement" is measured per spot against each source's own argmax-ET mask (the 4 3D members and the 2D model in evaluation runs), so it needs no ground truth and costs one extra argmax per source; the earlier whole-patient agreement (guards.py) was too coarse, catching 19-40% of bad cases, because it measured whole-tumour overlap rather than the ET spots where the errors are.
 **Assumption (Addendum 1):** A dropped spot under today's rule is treated as absent (it becomes non-enhancing core, which is how the existing rule scores); review spots count as caught for lesion-level scoring but are NOT counted as ET for `et_dice_kept`. Both Dice views are reported so neither framing hides the other.
 
@@ -91,7 +111,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 │   ├── sections.py               # alias import of section 01 / 03 `src` packages
 │   ├── models.py                 # hash-verified loading of the 2D ensemble and the 3D family
 │   ├── fusion.py                 # fuse, small-ET rule (mm^3), agreement
-│   ├── review_flags.py           # spot-level review flags + per-spot error scorecard (addendum 1; NOT used by pipeline.py)
+│   ├── review_flags.py           # spot-level review flags + per-spot error scorecard (addendum 1; used by pipeline.py when review_flags is on, addendum 2)
 │   ├── guards.py                 # agreement statuses, self_check, SelfCheckError
 │   ├── pipeline.py               # RStarSegmenter.segment / segment_paths
 │   └── cli.py                    # python -m rstar
@@ -105,6 +125,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
     ├── test_cli_readme.py        # Req 18, 20
     ├── test_regression.py        # Req 21 (slow, skipped without data)
     ├── test_review_flags.py      # Req 22-28 (addendum 1)
+    ├── test_pipeline_review.py   # Req 29-36 (addendum 2)
     └── fixtures/rstar_reference_scores.json
 ```
 
@@ -137,6 +158,10 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 | No ET predicted at all (Addendum 1) | No spots, empty review outputs; scorecard counts GT lesions as missed |
 | Agreement unavailable (no source masks) (Addendum 1) | `agreement = None`; never triggers `models_disagree` |
 | A spot exactly at a threshold (Addendum 1) | Kept (all cuts are strict `<` for review) |
+| Flags on, no ET predicted (Addendum 2) | `review_mask` all zeros, `review_spots == []`, `review_spot_count == 0` |
+| Flags on, 3D-only mode (Addendum 2) | Flags computed from the 3D argmax and `p3[1]` |
+| Flags on, the 500 mm³ rule erased all ET (Addendum 2) | Erased spots can still be flagged; labels unchanged |
+| `--review-mask` given without `--json` (Addendum 2) | Mask written; no report; exit 0 |
 ## 7. Done Checklist
 
 - [x] Req 1: `RStarConfig` defaults and validation errors
@@ -167,3 +192,11 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [ ] Req 26: today's rule as decisions matches `fusion.apply_small_et_rule` scoring below, at and above threshold
 - [ ] Req 27: dtype tolerance, invalid probabilities and mismatched masks rejected, edge spots, determinism
 - [ ] Req 28: only the new module, its tests and SPEC.md change; pipeline does not import it; existing tests pass unedited
+- [ ] Req 29: review-flag config defaults and validation
+- [ ] Req 30: flags off by default; no review fields
+- [ ] Req 31: labels, mode, status, warnings, diagnostics identical with flags on and off (R*, 3D-only, rule firing)
+- [ ] Req 32: exactly the low-confidence large spot flagged, values exact, mask exact, count in diagnostics
+- [ ] Req 33: spots erased by the 500 mm³ rule can still be flagged
+- [ ] Req 34: thresholds respected, boundary not flagged
+- [ ] Req 35: CLI --review-mask writes the mask and JSON spots; nothing extra without it
+- [ ] Req 36: real-data flags match the demo package (slow); README documents the option
