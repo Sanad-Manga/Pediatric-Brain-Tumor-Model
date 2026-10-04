@@ -4,6 +4,8 @@
 >
 > **Addendum 2 (2026-10-04) - review flags wired into `RStarSegmenter`, off by default:** §2, §3, §4 (Req 29-36), §5, §6 and §7 were extended. The pre-registered review-flag study (2026-10-02) chose the rule *flag every enhancing-tumour spot of at least 50 voxels whose mean ET probability is below 0.7* (fresh-30: silent false spots 3 -> 0, silently missed lesions 4 -> 3 of 21, 0.5 spots to review per patient). The team decided to integrate it after Oct 6 as its own reviewed step; this addendum is that step. Flags are **added information only**: with flags on or off the labels, mode, status, warnings and existing diagnostics are identical, so the deployed output does not change. It supersedes Addendum 1's out-of-scope line "Wiring review flags into `RStarSegmenter`, its CLI or its outputs" and the clause of Req 28 that `pipeline.py` does not import `review_flags`.
 >
+> **Addendum 3 (2026-10-04) - optional fragment cleanup, off by default:** §2, §3, §4 (Req 37-43), §5, §6 and §7 were extended. Under the official BraTS-PED lesion-wise metric every predicted component that touches no real tumour counts as a whole false lesion; R* leaves many tiny stray fragments (held-out tumour core: 110 in 23 of 81 patients, median 4 voxels). A pre-registered test (`PREREGISTERED_fragments_hybrid_2026-10-04`, cleanup size chosen on held-out only) found that removing components under 200 voxels before the 500 mm³ rule leaves legacy Dice unchanged on fresh-30 (0.8050 vs 0.8051) and raises lesion-wise Dice by +0.074 (CI +0.025 to +0.131); combined with review flags (`PREREGISTERED_combo_2026-10-04`) silent false ET spots fell 5 -> 2 (fresh-30) and 22 -> 2 (held-out). The size was chosen after seeing these sets, so the option ships off by default pending cross-validation.
+>
 ## 1. Goal
 A standalone, guard-railed Python package (`rstar`) that segments one co-registered BraTS-space pediatric brain MRI with the 2D+3D fusion recipe measured on 2026-09-26 (0.805 mean Dice on 30 patients that were never used to train or choose anything, against 0.711 for the shipped 2D ensemble), and fails loudly, not silently, when its inputs or its own geometry are wrong.
 
@@ -33,6 +35,12 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
   - `RStarResult` gains `review_mask` (uint8, the input's spatial shape, 0 = not flagged, k = flagged spot k) and `review_spots` (the issue #44 list); both are `None` when flags are off. `diagnostics` gains `review_spot_count` only when flags are on.
   - CLI: `--review-mask PATH` turns flags on, writes the review mask as a uint8 NIfTI with the input affine, and adds `review_spots` to the `--json` report.
 
+- **Fragment cleanup (Addendum 3):**
+  - `RStarConfig` gains `fragment_cleanup: bool = False` and `cleanup_min_voxels: int = 200`.
+  - New `fusion.remove_fragments(labels, min_voxels)` -> new array: every 26-connected component of the whole-tumour mask (labels 1-4) with fewer than `min_voxels` voxels becomes 0; then every 26-connected component of the remaining enhancing tumour (label 1) with fewer than `min_voxels` voxels becomes 2. Other labels and the input are unchanged; `min_voxels = 0` returns an equal copy.
+  - When `fragment_cleanup` is true, `segment` applies it to the fused labels (R* mode) or the 3D argmax (3D-only mode) **after** review flags are computed and **before** the 500 mm³ rule; `diagnostics` gains `fragment_voxels_removed` (whole-tumour voxels set to background) and `et_fragment_voxels_relabelled` only when it is on.
+  - CLI: `--fragment-cleanup` turns it on.
+
 ## 3. Out of Scope
 - Registration, skull-stripping, resampling to BraTS space, DICOM I/O, NIfTI header repair.
 - Any change to sections 01, 03 or 05 (`05_frontend_demo` is not touched; a later integration step is the maintainers' call).
@@ -40,6 +48,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - Uncertainty calibration or a learned confidence score. The agreement flag is a weak soft signal only; the module never withholds labels because of low agreement (one genuine 2D collapse on a correctly aligned held-out patient had agreement 0.000).
 - **Any claim of clinical validity or of performance on non-US data.** Reported numbers are US BraTS-PEDs only.
 - Bundling checkpoints into the repository.
+- **(Addendum 3)** Turning cleanup on by default; flagging the removed pieces (tested as COMBO-F: no measurable gain); per-region or per-label sizes; any change to `05_frontend_demo` beyond what Addendum 2 already excludes.
 - **(Addendum 2)** Changing the labels, status or warnings because of flags; per-spot model agreement inside the pipeline (it would need four extra 3D passes; the chosen rule does not use it, so `models_agree` is `null`); flags on by default; any change to `05_frontend_demo` or the deployed comparison package; the CLI writing flags without being asked.
 - **(Addendum 1)** Wiring review flags into `RStarSegmenter`, its CLI or its outputs; any change to existing `rstar` modules, the deployed models or the Oct-6 comparison package; choosing threshold values in code (evaluation runs pass them explicitly; defaults exist only as documented keyword defaults where stated); learned/calibrated uncertainty; any evaluation script with data paths (those live outside the repository); the Streamlit display (issue #44).
 
@@ -80,6 +89,13 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 34. Thresholds respected: raising `review_prob_cut` above (a)'s mean probability flags (a) too; setting `review_min_voxels` to 1 flags (c) too; a spot exactly at `review_prob_cut` is not flagged.
 35. CLI: `--review-mask out.nii.gz` with a stub segmenter writes a uint8 NIfTI equal to `review_mask` with the input affine, the `--json` report contains `review_spots` equal to the result's list, and without `--review-mask` no review file is written, the JSON has no `review_spots` key, and the segmenter was built with `review_flags=False`.
 36. Real-data check (slow, skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): for three of the 14 demo patients, the flagged spots' count and reasons equal, and each spot's voxel count is within 1% of, those in `05_frontend_demo/comparison_cache/<patient>/review_spots.json` (written by `add_review_flags.py` with the same rule), and `mean_et_prob` within 0.01. README documents the option, the rule, its source study and that flags do not change the labels.
+37. Config: `RStarConfig().fragment_cleanup is False` and `cleanup_min_voxels == 200`; a non-bool `fragment_cleanup`, or a negative, non-integer or bool `cleanup_min_voxels`, raises `ValueError` naming the field.
+38. `remove_fragments` on hand-built volumes: a whole-tumour component of `min_voxels - 1` voxels becomes 0 and one of exactly `min_voxels` is kept; an ET component below `min_voxels` inside a large tumour becomes 2 while the rest of that tumour is unchanged; two blocks touching only at a corner count as one component; the input array is not modified and the output dtype equals the input dtype; `min_voxels = 0` returns an array equal to the input.
+39. Off by default: with stub probabilities, `segment` with the default config returns labels identical to the labels computed without any cleanup and has no `fragment_voxels_removed` or `et_fragment_voxels_relabelled` key.
+40. On: `segment` with `fragment_cleanup=True` returns labels equal to `apply_small_et_rule(remove_fragments(pre_rule_labels, cleanup_min_voxels))`, in R* and 3D-only modes; the two diagnostics equal the voxel counts actually changed; with `review_flags=True` as well, `review_mask` and `review_spots` are identical to those with cleanup off.
+41. Order: on a stub case where removing an ET fragment brings the total ET below 500 mm³, the remaining ET is relabelled by the 500 mm³ rule (cleanup runs first) and `et_relabelled` is true.
+42. CLI: `--fragment-cleanup` builds the segmenter with `fragment_cleanup=True` (and an injected segmenter gets it set); without the option it is built with `fragment_cleanup=False`.
+43. Real data and docs (slow part skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): on three fresh-30 patients, `fragment_cleanup=True` changes the per-patient mean legacy Dice (ET, TC, WT; rule applied) by no more than 0.01 against cleanup off, and never leaves a whole-tumour component smaller than `cleanup_min_voxels`. README documents the option, the size, its source tests, and that it is off by default pending cross-validation.
 28. Isolation and regression: the only changed or new files are `rstar/review_flags.py`, `tests/test_review_flags.py` and `SPEC.md`; every other file in `06_rstar_inference/` is byte-identical; `rstar/pipeline.py` does not import `review_flags`; every pre-existing `06_rstar_inference` test passes unedited.
 
 **Assumption:** The negative-voxel limits (1% warn, 5% error) were set after the regression run showed that real BraTS-PEDs scans do contain negative voxels (0.03-0.47% in the four sequences of one fresh patient); the first draft of this spec wrongly rejected any negative value.
@@ -89,6 +105,8 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 **Assumption:** The module returns a single case per call, on one device, in float32; memory use is a full-resolution five-class probability volume per branch (about 180 MB each at 240×240×155).
 **Assumption:** Voxel volume is 1 mm³ for the BraTS grid; the mm³ form of the 500-voxel rule is the same rule expressed in physical units.
 
+**Assumption (Addendum 3):** Cleanup runs after flags are computed so the flags keep seeing everything the model predicted (the combination tested); it runs before the 500 mm³ rule so removed ET fragments no longer count toward the patient's ET total, exactly as in the test.
+**Assumption (Addendum 3):** Removing a whole-tumour component removes all its labels; an ET component is relabelled non-enhancing rather than removed, because it sits inside tumour the cleanup kept.
 **Assumption (Addendum 2):** Flags leave `status` alone: a flagged spot is information for the reader, and tying it to `'review'` would change the deployed output and make most patients `'review'` (about 0.5 flagged spots per patient on fresh-30).
 **Assumption (Addendum 2):** `models_agree` is `null` in the pipeline: the chosen rule ignores agreement, and computing it needs one extra 3D pass per member. `add_review_flags.py` (demo package) computed it; that is why Req 36 compares everything but agreement.
 **Assumption (Addendum 2):** Req 36 compares voxel counts within 1%, not exactly: the demo files were made on a GPU, and CPU and GPU arithmetic differ at a few boundary voxels (first run: 7,067 vs 7,064 voxels on 00004; the same effect as the shipped R* files differing by up to 49 voxels per patient).
@@ -111,7 +129,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 │   ├── preprocess.py             # 3D resample + z-score, 2D slices, restack, FRAME_FLIPS
 │   ├── sections.py               # alias import of section 01 / 03 `src` packages
 │   ├── models.py                 # hash-verified loading of the 2D ensemble and the 3D family
-│   ├── fusion.py                 # fuse, small-ET rule (mm^3), agreement
+│   ├── fusion.py                 # fuse, small-ET rule (mm^3), agreement, remove_fragments (addendum 3)
 │   ├── review_flags.py           # spot-level review flags + per-spot error scorecard (addendum 1; used by pipeline.py when review_flags is on, addendum 2)
 │   ├── guards.py                 # agreement statuses, self_check, SelfCheckError
 │   ├── pipeline.py               # RStarSegmenter.segment / segment_paths
@@ -127,6 +145,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
     ├── test_regression.py        # Req 21 (slow, skipped without data)
     ├── test_review_flags.py      # Req 22-28 (addendum 1)
     ├── test_pipeline_review.py   # Req 29-36 (addendum 2)
+    ├── test_fragment_cleanup.py  # Req 37-43 (addendum 3)
     └── fixtures/rstar_reference_scores.json
 ```
 
@@ -163,6 +182,9 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 | Flags on, 3D-only mode (Addendum 2) | Flags computed from the 3D argmax and `p3[1]` |
 | Flags on, the 500 mm³ rule erased all ET (Addendum 2) | Erased spots can still be flagged; labels unchanged |
 | `--review-mask` given without `--json` (Addendum 2) | Mask written; no report; exit 0 |
+| Cleanup on, no tumour predicted (Addendum 3) | Labels all 0; both cleanup diagnostics 0 |
+| Cleanup on, the whole prediction is one small component (Addendum 3) | Removed: labels all 0 (the patient gets no tumour) |
+| Cleanup removes an ET fragment and the remaining ET falls below 500 mm³ (Addendum 3) | The rule then relabels the remaining ET; `et_relabelled` true |
 ## 7. Done Checklist
 
 - [x] Req 1: `RStarConfig` defaults and validation errors
@@ -201,3 +223,10 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [ ] Req 34: thresholds respected, boundary not flagged
 - [ ] Req 35: CLI --review-mask writes the mask and JSON spots; nothing extra without it
 - [ ] Req 36: real-data flags match the demo package (slow); README documents the option
+- [ ] Req 37: fragment-cleanup config defaults and validation
+- [ ] Req 38: remove_fragments exact on hand-built volumes (boundary, ET inside tumour, corner, no mutation, dtype, 0 = identity)
+- [ ] Req 39: off by default; labels unchanged; no cleanup diagnostics
+- [ ] Req 40: on = rule(remove_fragments(pre)) in both modes; diagnostics exact; flags unchanged by cleanup
+- [ ] Req 41: cleanup runs before the 500 mm³ rule
+- [ ] Req 42: CLI --fragment-cleanup
+- [ ] Req 43: real-data Dice change <= 0.01 and no small components left (slow); README documents the option
