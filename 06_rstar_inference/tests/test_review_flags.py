@@ -183,6 +183,9 @@ def test_dtypes_validation_edges_and_determinism():
 
 
 # ------------------------------------------------------------------------------------------ Req 28
-def test_pipeline_does_not_use_review_flags():
+def test_pipeline_uses_review_flags_only_when_enabled():
+    # Addendum 2 supersedes Addendum 1's "pipeline does not import review_flags": the pipeline calls the module only
+    # behind cfg.review_flags (off by default); behaviour with flags on and off is tested in test_pipeline_review.py.
     src = (Path(__file__).resolve().parents[1] / "rstar" / "pipeline.py").read_text(encoding="utf-8")
-    assert "review_flags" not in src
+    assert "if self.cfg.review_flags:" in src
+    assert src.count("review_flags.") == 3            # find_et_spots, decide, review_outputs inside _review_flags
