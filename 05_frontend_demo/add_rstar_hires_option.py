@@ -3,7 +3,8 @@ r"""Add an EXTRA research option, "R* hi-res", to the comparison package. Nothin
 R* hi-res = the deployed R* pipeline (2D 0.5 + 3D 0.5, background x0.5, 500 mm3 rule) where the 3D part is the
 average of the deployed 96^3 family and a 4-member family trained on a 160^3 grid. Tested on saved outputs
 (neuropeds_overnight/PREREGISTERED_hires_gate_2026-10-03.md, arm A160): held-out 0.8139 vs 0.8096, fresh-30 0.8150 vs
-0.8051, no extra false enhancing tumour. It is a research option, NOT the deployed model; it still needs
+0.8051, no extra false enhancing tumour. A second, independently trained 160^3 family (PREREGISTERED_160_replication)
+repeated the fresh-30 gain (+0.0116) but not the held-out one (-0.0011): not confirmed. It is a research option, NOT the deployed model; it still needs
 cross-validation before it can replace R*.
 
 Writes per patient in comparison_cache/<patient>/:
@@ -33,9 +34,7 @@ HIRES_CKPT_DIR = Path(r"C:\Users\ahmed\neuropeds_overnight\ckpt_region")
 HIRES_MEMBERS = ["H160a15_ep109.pt", "H160a25_ep109.pt", "H160b15_ep109.pt", "H160b25_ep109.pt"]
 HIRES_CUBE = 160
 MAX_DIFF_FRACTION = 0.001
-NOTE = ("Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 "
-        "family and a 160^3-grid family. Better on both test sets in a saved-output test (held-out 0.814 vs 0.810, "
-        "fresh-30 0.815 vs 0.805, no extra false enhancing tumour); needs cross-validation before it can replace R*.")
+NOTE = ('Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family. Promising but not confirmed: retrained from scratch, it beat R* on the 30-patient clean test both times (+0.010, +0.012) but not on the 81 held-out patients the second time (+0.004, then -0.001); it needs cross-validation before it can replace R*.')
 
 
 def load_hires_family(device):

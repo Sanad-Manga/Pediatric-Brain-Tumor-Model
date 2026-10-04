@@ -77,5 +77,5 @@
       }
     }
   },
-  "rstar_hires_note": "Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family. Better on both test sets in a saved-output test (held-out 0.814 vs 0.810, fresh-30 0.815 vs 0.805, no extra false enhancing tumour); needs cross-validation before it can replace R*."
+  "rstar_hires_note": "Research option, not the deployed model: the R* pipeline with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family. Promising but not confirmed: retrained from scratch, it beat R* on the 30-patient clean test both times (+0.010, +0.012) but not on the 81 held-out patients the second time (+0.004, then -0.001); it needs cross-validation before it can replace R*."
 }
