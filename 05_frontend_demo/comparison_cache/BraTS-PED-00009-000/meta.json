@@ -58,21 +58,44 @@
     },
     "rstar_hires": {
       "ET": {
-        "dice": 0.9115,
-        "precision": 0.9375,
-        "recall": 0.8869
+        "dice": 0.9122,
+        "precision": 0.9343,
+        "recall": 0.891
       },
       "NC": {
-        "dice": 0.8266,
-        "precision": 0.9175,
-        "recall": 0.7521
+        "dice": 0.825,
+        "precision": 0.9263,
+        "recall": 0.7436
       },
       "WT": {
-        "dice": 0.9115,
-        "precision": 0.956,
-        "recall": 0.8709
+        "dice": 0.912,
+        "precision": 0.9539,
+        "recall": 0.8736
+      }
+    },
+    "rstar_clean": {
+      "ET": {
+        "dice": 0.9029,
+        "precision": 0.9273,
+        "recall": 0.8798
+      },
+      "NC": {
+        "dice": 0.8086,
+        "precision": 0.9194,
+        "recall": 0.7216
+      },
+      "WT": {
+        "dice": 0.8999,
+        "precision": 0.9469,
+        "recall": 0.8573
       }
     }
   },
-  "rstar_hires_note": "Research option, not the deployed model: R* with its 3D part averaged from the deployed 96^3 family and two independently trained 160^3 families. In a saved-output test it beat R* on both test sets with no extra false enhancing tumour (held-out 0.813 vs 0.810, clean test 0.816 vs 0.805), but the gain is small and the idea was formed on those same sets; it needs cross-validation before it can replace R*."
+  "rstar_hires_note": "Research option, not the deployed model: R* with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family trained for 170 epochs. In a pre-registered test it beat R* on both test sets with no extra false enhancing tumour (clean test 0.820 vs 0.805, held-out 0.816 vs 0.810, both statistically clear), mostly by finding small enhancing tumours better. One training run so far; it needs cross-validation before it can replace R*.",
+  "rstar_clean_note": "Research option, not the deployed model: R* with tumour pieces under 200 voxels removed before the 500 mm3 rule. In tests on 111 patients it left the usual Dice unchanged and raised the official BraTS lesion-wise score by about 0.07, with false enhancing spots shown as tumour falling from 22 to 2 (held-out). The size was chosen on those patients; it needs cross-validation before it can replace R*.",
+  "rstar_clean_changes": {
+    "voxels_changed": 16,
+    "tumour_voxels_removed": 0,
+    "enhancing_voxels_relabelled": 16
+  }
 }

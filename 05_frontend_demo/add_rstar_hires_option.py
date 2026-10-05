@@ -1,12 +1,11 @@
 r"""Add an EXTRA research option, "R* hi-res", to the comparison package. Nothing existing is changed.
 
 R* hi-res = the deployed R* pipeline (2D 0.5 + 3D 0.5, background x0.5, 500 mm3 rule) where the 3D part is
-0.5 x the deployed 96^3 family + 0.5 x the average of TWO independently trained 4-member 160^3 families (8 models).
-Saved-output results (neuropeds_overnight/PREREGISTERED_160_replication_2026-10-04.md, arm A160both): held-out 0.8133
-vs 0.8096 (+0.0037, 95% CI +0.0005..+0.0061), fresh-30 0.8160 vs 0.8051 (+0.0109, CI -0.003..+0.032), no extra
-false enhancing tumour on either set. Each 160^3 family alone: fresh-30 +0.010 / +0.012, held-out +0.004 / -0.001,
-so a single family is not reliable; averaging both is. Exploratory (idea formed after seeing these sets): a research
-option, NOT the deployed model; it needs cross-validation before it can replace R*.
+0.5 x the deployed 96^3 family + 0.5 x a 4-member 160^3 family trained for 170 epochs (the earlier 110-epoch 160^3
+families were undertrained). Pre-registered test (neuropeds_overnight/PREREGISTERED_160_long_2026-10-04.md, arm AL):
+held-out 0.8160 vs 0.8096 (+0.0064, 95% CI +0.0046..+0.0083), fresh-30 0.8204 vs 0.8051 (+0.0153, CI +0.0021..+0.0356),
+no extra false enhancing tumour; small/medium enhancing tumour on fresh-30 0.540 -> 0.628. One training run of the
+170-epoch family: a research option, NOT the deployed model; it needs cross-validation before it can replace R*.
 
 Writes per patient in comparison_cache/<patient>/:
   labels_rstar_hires.npz   {"labels": uint8 (240,240,155)}
@@ -32,10 +31,10 @@ from rstar import RStarSegmenter, RStarConfig, fusion, preprocess  # noqa: E402
 from rstar.sections import import_submodule  # noqa: E402
 
 HIRES_CKPT_DIR = Path(r"C:\Users\ahmed\neuropeds_overnight\ckpt_region")
-HIRES_MEMBERS = [f"H160{run}{m}_ep109.pt" for run in ("", "r") for m in ("a15", "a25", "b15", "b25")]  # both families
+HIRES_MEMBERS = [f"H160L{m}_ep169.pt" for m in ("a15", "a25", "b15", "b25")]  # the 170-epoch 160^3 family
 HIRES_CUBE = 160
 MAX_DIFF_FRACTION = 0.001
-NOTE = ('Research option, not the deployed model: R* with its 3D part averaged from the deployed 96^3 family and two independently trained 160^3 families. In a saved-output test it beat R* on both test sets with no extra false enhancing tumour (held-out 0.813 vs 0.810, clean test 0.816 vs 0.805), but the gain is small and the idea was formed on those same sets; it needs cross-validation before it can replace R*.')
+NOTE = ('Research option, not the deployed model: R* with its 3D part averaged from the deployed 96^3 family and a 160^3-grid family trained for 170 epochs. In a pre-registered test it beat R* on both test sets with no extra false enhancing tumour (clean test 0.820 vs 0.805, held-out 0.816 vs 0.810, both statistically clear), mostly by finding small enhancing tumours better. One training run so far; it needs cross-validation before it can replace R*.')
 
 
 def load_hires_family(device):

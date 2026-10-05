@@ -77,9 +77,11 @@ st.markdown("""
         hospital data silos strictly limit raw data sharing.
         <br><br>
         <b>NeuroPeds AI</b> is a workshop project that explores three ideas for that problem: data augmentation, federated 
-        learning (FedAvg), and CORAL domain adaptation. The model deployed in this clinical demo is a <b>centrally trained 2D U-Net 
-        ensemble</b> (augmentation on; federation and domain adaptation off). The federated and domain-adaptation code lives in 
-        separate research modules of the repository and did not produce the deployed checkpoint.
+        learning (FedAvg), and CORAL domain adaptation. The model we present is <b>R*</b>, which combines a
+        <b>centrally trained 2D U-Net ensemble</b> (augmentation on; federation and domain adaptation off) with a family of
+        four 3D models; its results are precomputed on test scans (Dashboard and Model Comparison pages). The live MRI
+        Analysis page runs the 2D ensemble alone. The federated and domain-adaptation code lives in separate research
+        modules of the repository and did not produce any deployed checkpoint.
     </div>
 </div>
 

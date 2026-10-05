@@ -88,7 +88,7 @@ def main() -> int:
                 entry["models"][model] = {"per_patient_mean_dice": round(float(np.mean(per_patient)), 4), "pooled": pooled}
             for r in rows:                                   # per-patient mean Dice, for the Dashboard's dot chart
                 entry["per_patient"].append({"patient": r["sid"], **{
-                    m: round(float(np.mean([_dice(*r[(m, reg)]) for reg in REGIONS])), 4) for m in ("2d", "3d", "rstar")}})
+                    m: round(float(np.mean([_dice(*r[(m, reg)]) for reg in REGIONS])), 6) for m in ("2d", "3d", "rstar")}})
             result["sets"][set_name] = entry
             print(set_name, {m: entry["models"][m]["per_patient_mean_dice"] for m in entry["models"]}, flush=True)
     OUT.write_text(json.dumps(result, indent=2), encoding="utf-8")
