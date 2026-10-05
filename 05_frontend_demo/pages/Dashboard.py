@@ -221,36 +221,39 @@ if model_metrics:
         st.divider()
         st.markdown('<div class="section-title">🟣 Enhancing tumour: silent errors with review flags</div>',
                     unsafe_allow_html=True)
-        st.markdown('<div class="section-subtitle">A silent error is a mistake nobody is told about. Today R* deletes '
-                    "all enhancing tumour when a patient's total is small. With review flags, uncertain spots are "
-                    'shown as "please review" instead (magenta on the Model Comparison page).</div>',
-                    unsafe_allow_html=True)
-        fs = flag_study["sets"]["fresh30"]; t, w = fs["today"], fs["with_flags"]
+        st.markdown('<div class="section-subtitle">A silent error is a mistake nobody is told about: a real enhancing '
+                    'tumour that is neither shown nor flagged, or a false enhancing spot shown as tumour. Review '
+                    'flags mark uncertain spots for a reader (magenta on the Model Comparison page); the fragment '
+                    'cleanup (a research option there) removes tiny stray pieces.</div>', unsafe_allow_html=True)
+        fs = flag_study["sets"]["fresh30"]
         st.markdown(f"""
 <div class="stat-grid" style="grid-template-columns: repeat(3,1fr);">
     <div class="stat-card">
-        <div class="stat-label">Silent false alarms</div>
-        <div class="stat-value">{t['silent_false']} → {w['silent_false']}</div>
-        <div class="stat-delta">fresh-30, today → with flags</div>
+        <div class="stat-label">Enhancing lesions missed silently</div>
+        <div class="stat-value">{fs['missed_today']} → {fs['missed_with_flags']}</div>
+        <div class="stat-delta">of {fs['lesions']} expert lesions · today → with flags</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">Silently missed lesions</div>
-        <div class="stat-value">{t['silent_missed']} → {w['silent_missed']}</div>
-        <div class="stat-delta" style="color:#64748B;">of {fs['lesions']} expert lesions</div>
+        <div class="stat-label">False enhancing spots shown as tumour</div>
+        <div class="stat-value">{fs['false_shown_today']} → {fs['false_shown_with_flags_and_cleanup']}</div>
+        <div class="stat-delta" style="color:#64748B;">today → with flags + fragment cleanup</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Spots to review</div>
-        <div class="stat-value">{w['review_load']:.1f}</div>
-        <div class="stat-delta" style="color:#64748B;">per patient ({w['flags_real']} real, {w['flags_false']} not)</div>
+        <div class="stat-value">{fs['flags_per_patient']:.1f}</div>
+        <div class="stat-delta" style="color:#64748B;">per patient ({fs['flags_real']} real, {fs['flags_false']} not)</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
         ho = flag_study["sets"]["heldout"]
-        st.caption(f"Rule: {flag_study['rule']} Held-out (81 patients, where the rule was chosen): silent false alarms "
-                   f"{ho['today']['silent_false']} → {ho['with_flags']['silent_false']}, silently missed lesions "
-                   f"{ho['today']['silent_missed']} → {ho['with_flags']['silent_missed']} of {ho['lesions']}. "
-                   "Flags remove silent false alarms; most missed lesions are never predicted by any model, so "
-                   "flags cannot recover them.")
+        st.caption(f"Clean test (30 patients). Held-out (81 patients): missed silently {ho['missed_today']} → "
+                   f"{ho['missed_with_flags']} of {ho['lesions']} with flags; false enhancing spots shown as tumour "
+                   f"{ho['false_shown_today']} → {ho['false_shown_with_flags_and_cleanup']} with flags + cleanup; "
+                   f"{ho['flags_per_patient']:.2f} spots to review per patient. Flags alone do not change what is shown "
+                   f"as tumour (false spots stay {fs['false_shown_with_flags']} and {ho['false_shown_with_flags']}); "
+                   f"with the cleanup as well, one more small lesion is missed on the clean test "
+                   f"({fs['missed_with_flags_and_cleanup']} instead of {fs['missed_with_flags']}). Lesions = expert enhancing "
+                   f"lesions over 50 voxels. Rule: {flag_study['rule']}")
     st.divider()
 
 if not metrics_data:
