@@ -136,7 +136,8 @@ def load_clean_labels(patient_id):
     return np.load(path)["labels"] if path.exists() else None
 
 
-def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False, changed_img=None):
+def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False, changed_img=None,
+                         height=320):
     fig = go.Figure()
     
     if bg_img is not None:
@@ -188,9 +189,28 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
         margin=dict(l=0, r=0, t=0, b=0),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        height=320
+        height=height
     )
     return fig
+
+
+@st.dialog("Enlarged view", width="large")
+def show_enlarged(title, viewer_args, expert_args):
+    """One panel at a large size, next to the expert's segmentation of the same slice (unless it is the expert)."""
+    cfg = {'displayModeBar': False}
+    if expert_args is None:
+        st.markdown(f"#### {title}")
+        st.plotly_chart(create_plotly_viewer(*viewer_args, height=640), use_container_width=True, config=cfg, key="big_one")
+    else:
+        left, right = st.columns(2)
+        with left:
+            st.markdown(f"#### {title}")
+            st.plotly_chart(create_plotly_viewer(*viewer_args, height=560), use_container_width=True, config=cfg, key="big_model")
+        with right:
+            st.markdown("#### Expert")
+            st.plotly_chart(create_plotly_viewer(*expert_args, height=560), use_container_width=True, config=cfg, key="big_expert")
+    st.caption("Colours: red = enhancing tumour · green = non-enhancing core · blue = cyst · yellow = oedema · "
+               "magenta = flagged for review · cyan ring = removed or relabelled by the fragment cleanup.")
 
 def main():
     st.markdown("""
@@ -312,26 +332,29 @@ def main():
         rstar_title = "R* hi-res" if use_hires else "R* clean" if use_clean else "R*"
         changed = (lbl_rstar != lbl_rstar_clean) if use_clean else None
         
-        with img_col1:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>2D model</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_plotly_viewer(bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_2d")
-        with img_col2:
-            st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>3D family</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_plotly_viewer(bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False), use_container_width=True, config={'displayModeBar': False}, key="viewer_3d")
-        with img_col3:
-            st.markdown(f"<h4 style='font-family: Outfit, sans-serif; color: #0EA5E9;'>{rstar_title}</h4>", unsafe_allow_html=True)
+        expert_args = None
+        if show_expert:
+            expert = load_expert(selected_patient)
+            expert_args = (bg_img, expert[:, :, slice_idx], show_mask, None, False)
+        panels = [
+            (img_col1, "2D model", "#0F172A", "viewer_2d", (bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False)),
+            (img_col2, "3D family", "#0F172A", "viewer_3d", (bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False)),
             # flags were computed from the deployed R*, so they are only drawn on it, not on the hi-res option
-            st.plotly_chart(create_plotly_viewer(bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice,
-                                                 show_review and not use_hires,
-                                                 changed[:, :, slice_idx] if use_clean else None),
-                            use_container_width=True, config={'displayModeBar': False}, key="viewer_rstar")
-            if show_expert:
-                with img_col4:
-                    st.markdown("<h4 style='font-family: Outfit, sans-serif; color: #0F172A;'>Expert</h4>",
-                                unsafe_allow_html=True)
-                    expert = load_expert(selected_patient)
-                    st.plotly_chart(create_plotly_viewer(bg_img, expert[:, :, slice_idx], show_mask, None, False),
-                                    use_container_width=True, config={'displayModeBar': False}, key="viewer_expert")
+            (img_col3, rstar_title, "#0EA5E9", "viewer_rstar",
+             (bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice, show_review and not use_hires,
+              changed[:, :, slice_idx] if use_clean else None)),
+        ]
+        if show_expert:
+            panels.append((img_col4, "Expert", "#0F172A", "viewer_expert", expert_args))
+        for col, title, colour, key, args in panels:
+            with col:
+                st.markdown(f"<h4 style='font-family: Outfit, sans-serif; color: {colour};'>{title}</h4>",
+                            unsafe_allow_html=True)
+                st.plotly_chart(create_plotly_viewer(*args), use_container_width=True,
+                                config={'displayModeBar': False}, key=key)
+                if st.button("🔍 Enlarge", key=f"{key}_enlarge", use_container_width=True):
+                    show_enlarged(f"{title} · slice {slice_idx}", args, None if title == "Expert" else expert_args)
+        with img_col3:
             if use_hires and has_review and show_review:
                 st.caption("Flagged spots belong to the deployed R*; choose another R* version to see them.")
 
