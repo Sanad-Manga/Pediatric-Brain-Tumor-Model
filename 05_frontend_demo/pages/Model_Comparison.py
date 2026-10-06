@@ -164,9 +164,13 @@ def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_revi
         fig.add_trace(go.Heatmap(z=mask_display, colorscale=colorscale, zmin=0, zmax=4, showscale=False, hoverinfo='skip'))
 
     if changed_img is not None and changed_img.any():
-        changed_display = np.where(np.ascontiguousarray(changed_img.T.copy()), 1, np.nan)
-        fig.add_trace(go.Heatmap(z=changed_display, colorscale=[[0.0, 'rgba(0,0,0,0)'], [1.0, 'rgba(255,255,255,0.95)']],
-                                 zmin=0, zmax=1, showscale=False, hoverinfo='skip'))
+        # Cleanup pieces are only a few pixels per slice: fill them in cyan and draw a thick cyan ring around each
+        # one, so they stay visible on bright tissue and next to the label colours (red/green/blue/yellow/magenta).
+        piece = np.ascontiguousarray(changed_img.T.copy()).astype(bool)
+        ring = ndimage.binary_dilation(piece, iterations=3) & ~ndimage.binary_dilation(piece, iterations=1)
+        changed_display = np.where(ring, 2, np.where(piece, 1, np.nan))
+        fig.add_trace(go.Heatmap(z=changed_display, colorscale=[[0.0, 'rgba(0,229,255,0.55)'], [1.0, 'rgba(0,229,255,1.0)']],
+                                 zmin=1, zmax=2, showscale=False, hoverinfo='skip'))
 
     if show_review and review_img is not None:
         review_display = np.where(review_img == 0, np.nan, 1)
@@ -333,7 +337,7 @@ def main():
 
         st.caption("Colours: red = enhancing tumour (ET) · green = non-enhancing core · blue = cyst · "
                    "yellow = oedema · magenta = spot flagged for review (R* panel only) · "
-                   "white = what the fragment cleanup removed or relabelled (R* + cleanup only). "
+                   "cyan ring = what the fragment cleanup removed or relabelled (R* + cleanup only). "
                    "Tumour core (TC) = red + green + blue; whole tumour (WT) = all four.")
 
         if has_review:
@@ -393,8 +397,8 @@ def main():
             else:
                 sizes = np.bincount(pieces.ravel())[1:]
                 order = np.argsort(-sizes)[:6]
-                st.info(f"The fragment cleanup changed {int(changed.sum())} voxels in {n_pieces} small pieces (white "
-                        "outline). Compare with the Expert panel: some pieces are false alarms, some are real tumour.")
+                st.info(f"The fragment cleanup changed {int(changed.sum())} voxels in {n_pieces} small pieces (cyan "
+                        "ring). Compare with the Expert panel: some pieces are false alarms, some are real tumour.")
                 change_cols = st.columns(min(len(order), 6))
                 for i, k in enumerate(order):
                     piece = pieces == k + 1
