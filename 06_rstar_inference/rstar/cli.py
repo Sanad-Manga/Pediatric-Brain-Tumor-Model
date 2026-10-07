@@ -1,4 +1,4 @@
-"""python -m rstar --t1c a.nii.gz --t1n b.nii.gz --t2f c.nii.gz --t2w d.nii.gz --out seg.nii.gz [--json report.json] [--models-root DIR]
+"""python -m rstar --t1c a.nii.gz --t1n b.nii.gz --t2f c.nii.gz --t2w d.nii.gz --out seg.nii.gz [--json report.json] [--models-root DIR] [--review-mask flags.nii.gz] [--fragment-cleanup]
 
 A sequence whose flag is omitted is treated as absent. Exit codes: 0 = written (status 'ok' or 'review'), 2 = the input broke the contract.
 """
@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument(f"--{name}", default=None, help=f"NIfTI file for {name}; omit if the sequence was not acquired")
     p.add_argument("--out", required=True, help="output label NIfTI (uint8, labels 0-4)")
     p.add_argument("--json", default=None, help="write a JSON report (status, mode, warnings, diagnostics)")
+    p.add_argument("--review-mask", default=None,
+                   help="also flag uncertain enhancing-tumour spots: write them here as a uint8 NIfTI (0 = none, k = spot k) "
+                        "and add review_spots to the --json report; the labels in --out are unchanged")
+    p.add_argument("--fragment-cleanup", action="store_true",
+                   help="remove tumour fragments smaller than 200 voxels before the small-ET rule (off by default; see README)")
     p.add_argument("--models-root", default=None, help="directory holding the checkpoints (default: env RSTAR_MODELS_ROOT, else the repo root)")
     return p
 
@@ -48,14 +53,25 @@ def main(argv=None, segmenter=None) -> int:
         if segmenter is None:
             from .pipeline import RStarSegmenter
 
-            segmenter = RStarSegmenter(RStarConfig(models_root=Path(args.models_root) if args.models_root else None))
+            segmenter = RStarSegmenter(RStarConfig(models_root=Path(args.models_root) if args.models_root else None,
+                                                   review_flags=args.review_mask is not None,
+                                                   fragment_cleanup=args.fragment_cleanup))
+        else:
+            if args.review_mask is not None:
+                segmenter.cfg.review_flags = True
+            if args.fragment_cleanup:
+                segmenter.cfg.fragment_cleanup = True
         result, affine = segmenter.segment_paths(paths)
     except ContractError as exc:
         print(f"rstar: input rejected: {exc}", file=sys.stderr)
         return 2
     nib.save(nib.Nifti1Image(result.labels.astype(np.uint8), affine), args.out)
+    if args.review_mask is not None:
+        nib.save(nib.Nifti1Image(result.review_mask.astype(np.uint8), affine), args.review_mask)
     if args.json:
         report = {"status": result.status, "mode": result.mode, "warnings": result.warnings, "diagnostics": result.diagnostics}
+        if args.review_mask is not None:
+            report["review_spots"] = result.review_spots
         Path(args.json).write_text(json.dumps(_jsonable(report), indent=2), encoding="utf-8")
     for w in result.warnings:
         print(f"rstar: warning: {w}", file=sys.stderr)

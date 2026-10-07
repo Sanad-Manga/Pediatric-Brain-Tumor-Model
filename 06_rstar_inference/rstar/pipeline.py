@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from . import fusion, guards, models as model_loading, preprocess
+from . import fusion, guards, models as model_loading, preprocess, review_flags
 from .config import SEQUENCES, RStarConfig
 from .contract import ContractError, validate_input
 
@@ -24,6 +24,8 @@ class RStarResult:
     status: str                                 # 'ok' or 'review'
     warnings: list = field(default_factory=list)
     diagnostics: dict = field(default_factory=dict)
+    review_mask: np.ndarray | None = None       # uint8, 0 = not flagged, k = flagged spot k (only when review_flags is on)
+    review_spots: list | None = None            # issue #44 list (only when review_flags is on)
 
 
 def _softmax(logits: np.ndarray, axis: int = 1) -> np.ndarray:
@@ -128,6 +130,16 @@ class RStarSegmenter:
         else:
             labels = fusion.argmax_labels(p3)               # measured 3D-only path: plain argmax, no background scaling
 
+        review_mask = review_spots = None
+        if self.cfg.review_flags:                           # from the labels BEFORE the 500 mm^3 rule (it may erase them)
+            et_prob = p3[1] if mode == "3D-only" else self.cfg.w3d * p3[1] + (1.0 - self.cfg.w3d) * p2[1]
+            review_mask, review_spots = self._review_flags(labels, np.clip(et_prob, 0.0, 1.0))
+
+        cleanup = None
+        if self.cfg.fragment_cleanup:                       # after the flags (they see everything), before the 500 mm^3 rule
+            labels, wt_removed, et_cleaned = fusion.remove_fragments(labels, self.cfg.cleanup_min_voxels)
+            cleanup = {"fragment_voxels_removed": wt_removed, "et_fragment_voxels_relabelled": et_cleaned}
+
         labels, et_before, relabelled = fusion.apply_small_et_rule(
             labels, self.cfg.et_min_mm3, self.cfg.voxel_mm3 if voxel_mm3 is None else voxel_mm3)
         diagnostics = {
@@ -139,7 +151,19 @@ class RStarSegmenter:
             "checkpoints": [{"name": c["name"], "sha256": c["sha256"]} for c in self._checkpoints],
             "elapsed_s": round(time.time() - t0, 2),
         }
-        return RStarResult(labels=labels.astype(np.uint8), mode=mode, status=status, warnings=warnings, diagnostics=diagnostics)
+        if review_spots is not None:
+            diagnostics["review_spot_count"] = len(review_spots)
+        if cleanup is not None:
+            diagnostics.update(cleanup)
+        return RStarResult(labels=labels.astype(np.uint8), mode=mode, status=status, warnings=warnings, diagnostics=diagnostics,
+                           review_mask=review_mask, review_spots=review_spots)
+
+    def _review_flags(self, pre_rule_labels: np.ndarray, et_prob: np.ndarray):
+        """Spots of pre-rule ET with >= review_min_voxels voxels and mean ET probability < review_prob_cut (SPEC Addendum 2)."""
+        spot_ids, spots = review_flags.find_et_spots(pre_rule_labels, et_prob)
+        big = [s for s in spots if s.voxels >= self.cfg.review_min_voxels]
+        decisions = review_flags.decide(big, size_cut=0, prob_cut=self.cfg.review_prob_cut, agree_cut=0.0, small_cut=0)
+        return review_flags.review_outputs(spot_ids, big, decisions)
 
     def segment_paths(self, paths: dict):
         """paths maps 't1c','t1n','t2f','t2w' to NIfTI files (a missing or None entry = absent sequence).

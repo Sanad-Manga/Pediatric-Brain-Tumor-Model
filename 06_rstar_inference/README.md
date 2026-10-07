@@ -47,6 +47,29 @@ python -m rstar --t1c t1c.nii.gz --t1n t1n.nii.gz --t2f flair.nii.gz --t2w t2.ni
 
 Exit code 0 = written, 2 = the input broke the contract.
 
+## Review flags (optional)
+
+With `RStarConfig(review_flags=True)` (CLI: `--review-mask flags.nii.gz`), R* also returns the enhancing-tumour spots it
+is unsure about, so a reader can check them instead of their being silently kept or deleted. Rule, chosen in the
+pre-registered review-flag study of 2026-10-02: every connected enhancing-tumour spot of at least 50 voxels, taken
+**before** the 500 mm³ rule, whose mean enhancing-tumour probability is below 0.7 (`review_min_voxels`,
+`review_prob_cut`). On the 30-patient clean test this removed every silent false spot (3 -> 0) at about one spot to
+review per two patients.
+
+`result.review_mask` (uint8: 0 = not flagged, k = spot k) and `result.review_spots` (a list of `spot_id`, `voxels`,
+`mean_et_prob`, `models_agree` (always `null` here), `reason`) are `None` when flags are off. Flags are added
+information only: the labels, mode, status and warnings are identical with flags on or off.
+
+## Fragment cleanup (optional, off by default)
+
+With `RStarConfig(fragment_cleanup=True)` (CLI: `--fragment-cleanup`), every connected piece of predicted tumour
+smaller than 200 voxels (`cleanup_min_voxels`) is removed, and every enhancing-tumour piece smaller than that becomes
+non-enhancing, before the 500 mm³ rule. Review flags are still computed from the uncleaned prediction. In the
+pre-registered tests of 2026-10-04 (`PREREGISTERED_fragments_hybrid`, `PREREGISTERED_combo`) this left the usual Dice
+unchanged on the 30-patient clean test and raised the official BraTS-PED lesion-wise Dice by about 0.07, because the
+lesion-wise metric counts every stray fragment as a false lesion. The size of 200 was chosen on the held-out patients,
+so the option stays off by default until cross-validation confirms it.
+
 ## Checkpoints
 
 Checkpoints are not in git. `config/models.default.json` pins each file by path (relative to the models root: argument, else

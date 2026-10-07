@@ -46,3 +46,32 @@ def whole_tumour_dice(a: np.ndarray, b: np.ndarray) -> float:
 def agreement(p2: np.ndarray, p3: np.ndarray) -> float:
     """Whole-tumour Dice between the 2D-alone and the 3D-alone argmax. No ground truth needed."""
     return whole_tumour_dice(np.argmax(p2, axis=0), np.argmax(p3, axis=0))
+
+
+_STRUCTURE_26 = np.ones((3, 3, 3), dtype=bool)
+
+
+def remove_fragments(labels: np.ndarray, min_voxels: int):
+    """SPEC Addendum 3. Whole-tumour (labels 1-4) components with fewer than min_voxels voxels become 0; then
+    enhancing-tumour (1) components with fewer than min_voxels voxels become 2. 26-connectivity.
+    Returns (new labels, whole-tumour voxels removed, ET voxels relabelled). The input is never modified."""
+    from scipy import ndimage  # local import: keeps `import rstar` light
+
+    out = np.array(labels, copy=True)
+    removed = relabelled = 0
+    if min_voxels <= 0:
+        return out, removed, relabelled
+    for mask_value, new_value in ((None, 0), (1, 2)):
+        mask = out > 0 if mask_value is None else out == mask_value
+        comp, n = ndimage.label(mask, _STRUCTURE_26)
+        if n == 0:
+            continue
+        sizes = np.bincount(comp.ravel())
+        small = (sizes[comp] < min_voxels) & mask
+        count = int(small.sum())
+        out[small] = new_value
+        if new_value == 0:
+            removed = count
+        else:
+            relabelled = count
+    return out, removed, relabelled
