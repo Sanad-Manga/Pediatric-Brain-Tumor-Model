@@ -113,7 +113,7 @@ def test_cli_writes_outputs(tmp_path):  # Req 5
     for n in align.SEQUENCES:
         assert (tmp_path / "out" / f"p1-{n}.nii.gz").is_file()
     rep = json.loads((tmp_path / "out" / "alignment.json").read_text())
-    assert rep["t1c"] == {"reference": True} and set(rep) == set(align.SEQUENCES)
+    assert rep["t1c"] == {"reference": True} and set(rep) == set(align.SEQUENCES) | {"skip_below_mm"}
 
 
 def test_cli_missing_input(tmp_path, capsys):  # Req 5, edge case
@@ -123,3 +123,60 @@ def test_cli_missing_input(tmp_path, capsys):  # Req 5, edge case
     assert align.main(args) == 1
     err = capsys.readouterr().err
     assert "missing input" in err and "nope.nii.gz" in err
+
+
+# ---- Addendum 1: skip realignment when already aligned (Req 13-17) ----
+
+def _case(tmp, shifts):
+    """t1c = phantom; each other sequence moved by shifts[name] = (rot_deg, shift_mm) or None (left exactly in place)."""
+    ref = phantom(48, seed=11)
+    paths = {}
+    for name in align.SEQUENCES:
+        s = shifts.get(name)
+        img = ref if s is None else sitk.Resample(ref, ref, euler(ref, *s), sitk.sitkLinear, 0.0)
+        paths[name] = tmp / f"s-{name}.nii.gz"
+        sitk.WriteImage(img, str(paths[name]))
+    return paths
+
+
+def test_report_has_displacement_and_skipped(tmp_path):  # Req 13
+    _, rep = align.align_sequences(_case(tmp_path, {}))
+    for name in ("t1n", "t2f", "t2w"):
+        assert isinstance(rep[name]["displacement_mm"], float) and isinstance(rep[name]["skipped"], bool)
+
+
+def test_aligned_sequence_returned_identical(tmp_path):  # Req 14
+    paths = _case(tmp_path, {})
+    out, rep = align.align_sequences(paths)
+    for name in ("t1n", "t2f", "t2w"):
+        assert rep[name]["skipped"], rep[name]
+        np.testing.assert_array_equal(sitk.GetArrayFromImage(out[name]),
+                                      sitk.GetArrayFromImage(sitk.ReadImage(str(paths[name]))))
+
+
+def test_misaligned_sequence_is_realigned(tmp_path):  # Req 15
+    out, rep = align.align_sequences(_case(tmp_path, {"t2w": ((0, 0, 4), (3, -2, 1))}))
+    assert not rep["t2w"]["skipped"] and rep["t2w"]["displacement_mm"] > 1.0
+    assert rep["t1n"]["skipped"]
+
+
+def test_threshold_zero_never_skips_and_other_grid_resampled(tmp_path):  # Req 16
+    paths = _case(tmp_path, {})
+    _, rep = align.align_sequences(paths, skip_below_mm=0)
+    assert not any(rep[n]["skipped"] for n in ("t1n", "t2f", "t2w"))
+    ref = sitk.ReadImage(str(paths["t1c"]))
+    shifted = sitk.Image(ref)
+    shifted.SetOrigin(tuple(o + 0.5 for o in ref.GetOrigin()))  # same voxels, different grid
+    sitk.WriteImage(shifted, str(paths["t2f"]))
+    out, rep = align.align_sequences(paths, skip_below_mm=100)
+    assert not rep["t2f"]["skipped"]
+    assert align.same_grid(out["t2f"], ref)
+
+
+def test_cli_threshold_recorded(tmp_path):  # Req 17
+    paths = _case(tmp_path, {})
+    args = sum(([f"--{n}", str(p)] for n, p in paths.items()), []) + ["--out-dir", str(tmp_path / "o"), "--skip-below-mm", "0"]
+    assert align.main(args) == 0
+    rep = json.loads((tmp_path / "o" / "alignment.json").read_text())
+    assert rep["skip_below_mm"] == 0 and not rep["t2w"]["skipped"]
+    assert align.main(args[:-1] + ["-1"]) == 1

@@ -86,3 +86,41 @@ registration). **Assumption:** linear interpolation for images is acceptable; it
 - [ ] Req 10: verification B passes on the same 10 patients.
 - [ ] Req 11: verification C: realigned within 0.01 of clean; misaligned reported.
 - [ ] Req 12: RESULTS_alignment.md written with every checked number.
+
+---
+
+# Addendum 1 (8 Oct 2026): skip realignment when a sequence is already aligned
+
+## Goal
+Leave a sequence untouched when the registration finds it is already aligned to T1c, so already-aligned scans are never
+resampled (verification B: the step nudged BraTS scans by 0.07-1.6 mm, and resampling can flip R*'s fragile
+enhancing-tumour decision).
+
+## In Scope
+- After registering a sequence, measure the transform's **mean displacement**: the mean distance a brain point (T1c > 0,
+  5,000-point fixed-seed sample) moves under it.
+- If it is below `skip_below_mm` (default 1.0 mm) and the sequence is already on the T1c grid, return the original image
+  unchanged. Otherwise resample as before.
+- Report per sequence: `displacement_mm` and `skipped` (true/false). CLI flag `--skip-below-mm` (0 disables skipping).
+
+## Out of Scope
+- Choosing the threshold from outcome data (1.0 mm is set before any check: about half a voxel of the 96^3 grid R* uses
+  in 3D, and below the 1 mm shift that cost R* 0.023 in the stress test).
+- Changes to the registration itself.
+
+## Requirements
+13. `align_sequences` reports `displacement_mm` and `skipped` for T1n, T2-FLAIR and T2w.
+14. A sequence already on the T1c grid whose displacement is below the threshold is returned voxel-identical to its input.
+15. A sequence misaligned by 3 mm / 4 degrees is realigned (not skipped) at the default threshold.
+16. `skip_below_mm=0` never skips; a sequence on a different grid is always resampled, never returned as-is.
+17. CLI `--skip-below-mm` sets the threshold and alignment.json records it.
+18. On real BraTS scans (3 fresh-30 patients, untouched): the sequences whose verification-B displacement was below 1 mm
+    are skipped and their R* input is therefore identical to the original.
+
+## Done Checklist
+- [ ] Req 13: displacement_mm and skipped reported per sequence.
+- [ ] Req 14: below-threshold on-grid sequence returned voxel-identical.
+- [ ] Req 15: 3 mm / 4 degree misalignment realigned at default threshold.
+- [ ] Req 16: threshold 0 never skips; different grid always resampled.
+- [ ] Req 17: CLI --skip-below-mm sets and records the threshold.
+- [ ] Req 18: real-scan check on 3 fresh-30 patients.

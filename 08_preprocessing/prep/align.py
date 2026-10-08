@@ -67,9 +67,28 @@ def transform_summary(t: sitk.Euler3DTransform) -> dict:
             "translation_mm": [round(v, 3) for v in (tx, ty, tz)], "center_mm": [round(v, 3) for v in t.GetCenter()]}
 
 
-def align_sequences(paths: dict[str, str | Path], seed: int = SEED) -> tuple[dict[str, sitk.Image], dict]:
+def same_grid(a: sitk.Image, b: sitk.Image, tol: float = 1e-4) -> bool:
+    return (a.GetSize() == b.GetSize()
+            and np.allclose(a.GetSpacing(), b.GetSpacing(), atol=tol)
+            and np.allclose(a.GetOrigin(), b.GetOrigin(), atol=tol)
+            and np.allclose(a.GetDirection(), b.GetDirection(), atol=tol))
+
+
+def mean_displacement_mm(t: sitk.Transform, fixed: sitk.Image, n: int = 5000, seed: int = SEED) -> float:
+    """Mean distance (mm) that brain points of `fixed` (voxels > 0; a fixed-seed sample of `n`) move under `t`."""
+    idx = np.argwhere(sitk.GetArrayViewFromImage(fixed) > 0)
+    if len(idx) == 0:
+        idx = np.argwhere(np.ones(sitk.GetArrayViewFromImage(fixed).shape, bool))
+    pick = idx[np.random.default_rng(seed).choice(len(idx), min(n, len(idx)), replace=False)]
+    pts = np.array([fixed.TransformIndexToPhysicalPoint([int(i) for i in p[::-1]]) for p in pick])
+    return float(residual_error_mm(pts, t).mean())
+
+
+def align_sequences(paths: dict[str, str | Path], seed: int = SEED,
+                    skip_below_mm: float = 1.0) -> tuple[dict[str, sitk.Image], dict]:
     """Align T1n, T2-FLAIR and T2w to T1c. Returns ({sequence: image on the T1c grid}, {sequence: report}).
-    T1c is returned unchanged."""
+    T1c is returned unchanged. A sequence already on the T1c grid whose registration moves brain points by less than
+    `skip_below_mm` on average is returned unchanged too (resampling an aligned scan only blurs it); 0 disables this."""
     images = {}
     for name in SEQUENCES:
         p = Path(paths[name])
@@ -85,8 +104,12 @@ def align_sequences(paths: dict[str, str | Path], seed: int = SEED) -> tuple[dic
             aligned, t, metric = align_to_reference(images[name], fixed, seed)
         except RuntimeError as exc:
             raise RuntimeError(f"{name}: {exc}") from exc
-        out[name] = aligned
-        report[name] = {**transform_summary(t), "metric": round(metric, 5)}
+        disp = mean_displacement_mm(t, fixed, seed=seed)
+        skipped = skip_below_mm > 0 and disp < skip_below_mm and same_grid(images[name], fixed)
+        out[name] = images[name] if skipped else aligned
+        report[name] = {**transform_summary(t), "metric": round(metric, 5), "displacement_mm": round(disp, 3),
+                        "skipped": bool(skipped)}
+    report["skip_below_mm"] = skip_below_mm
     return out, report
 
 
@@ -108,9 +131,14 @@ def main(argv=None) -> int:
         ap.add_argument(f"--{name}", required=True, help=f"{name} NIfTI file")
     ap.add_argument("--out-dir", required=True, help="directory for the aligned files and alignment.json")
     ap.add_argument("--prefix", default="aligned", help="output file prefix (default: aligned)")
+    ap.add_argument("--skip-below-mm", type=float, default=1.0,
+                    help="leave a sequence unchanged if alignment would move it less than this on average (0 = always resample)")
     args = ap.parse_args(argv)
+    if args.skip_below_mm < 0:
+        print("error: --skip-below-mm must be >= 0", file=sys.stderr)
+        return 1
     try:
-        images, report = align_sequences({n: getattr(args, n) for n in SEQUENCES})
+        images, report = align_sequences({n: getattr(args, n) for n in SEQUENCES}, skip_below_mm=args.skip_below_mm)
     except (FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

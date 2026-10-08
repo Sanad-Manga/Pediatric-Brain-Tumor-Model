@@ -1,0 +1,10 @@
+00077 t1n: displacement 0.204 mm -> skipped True | output identical to input True | rotation [-0.093, 0.16, 0.061] deg, translation [0.057, 0.014, 0.055] mm
+00077 t2f: displacement 0.528 mm -> skipped True | output identical to input True | rotation [0.427, 0.161, 0.002] deg, translation [-0.023, -0.136, -0.239] mm
+00077 t2w: displacement 0.306 mm -> skipped True | output identical to input True | rotation [-0.106, 0.204, 0.097] deg, translation [0.103, -0.13, 0.028] mm
+00127 t1n: displacement 0.439 mm -> skipped True | output identical to input True | rotation [0.288, 0.06, 0.04] deg, translation [0.092, -0.137, -0.252] mm
+00127 t2f: displacement 0.544 mm -> skipped True | output identical to input True | rotation [0.38, -0.019, -0.017] deg, translation [0.123, -0.02, -0.314] mm
+00127 t2w: displacement 1.589 mm -> skipped False | output identical to input False | rotation [-0.637, 0.15, 0.193] deg, translation [0.169, 0.766, -1.045] mm
+00128 t1n: displacement 0.216 mm -> skipped True | output identical to input True | rotation [-0.145, 0.024, -0.085] deg, translation [-0.043, 0.006, 0.083] mm
+00128 t2f: displacement 0.074 mm -> skipped True | output identical to input True | rotation [-0.0, -0.023, -0.015] deg, translation [-0.065, -0.009, 0.019] mm
+00128 t2w: displacement 0.313 mm -> skipped True | output identical to input True | rotation [-0.121, 0.045, 0.088] deg, translation [-0.013, 0.244, -0.037] mm
+Req 18: PASS (every skipped sequence is identical to its input; every non-skipped one was resampled)

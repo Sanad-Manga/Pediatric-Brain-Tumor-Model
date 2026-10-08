@@ -62,3 +62,26 @@ where the recovered transform puts it, over 20,000 brain points. Logged by `tool
 - Separate finding: the rstar input check rejects at least one genuine BraTS scan (00115). Its 30-60% background rule
   needs revisiting before hospital scans arrive.
 
+
+## Addendum 1: skip realignment when already aligned (Req 13-18)
+
+13 unit tests pass (5 new for the skip rule). Mutation check: flipping the comparison or dropping the same-grid test is
+caught; changing `> 0` to `>= 0` survives but is equivalent (a displacement is never below 0).
+
+Real-scan check (`tools/check_skip.py`, untouched fresh-30 scans, default threshold 1.0 mm):
+
+| Patient | Sequence | Displacement (mm) | Skipped | Output identical to input |
+|---|---|---|---|---|
+| 00077 | t1n | 0.204 | True | True |
+| 00077 | t2f | 0.528 | True | True |
+| 00077 | t2w | 0.306 | True | True |
+| 00127 | t1n | 0.439 | True | True |
+| 00127 | t2f | 0.544 | True | True |
+| 00127 | t2w | 1.589 | False | False |
+| 00128 | t1n | 0.216 | True | True |
+| 00128 | t2f | 0.074 | True | True |
+| 00128 | t2w | 0.313 | True | True |
+
+**Req 18: PASS.** 8 of 9 sequences are left byte-identical; 00127 T2w (1.59 mm) is realigned. Note the rule protects
+already-aligned scans only: a genuinely misaligned scan (C: 2 mm + 3 degrees) is still resampled, and 00077's flip in C
+came from that realignment, so it is not prevented by this rule.
