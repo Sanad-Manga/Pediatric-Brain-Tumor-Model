@@ -1,0 +1,11 @@
+00115 raw t1c: dtype float64, exactly-zero 3.7%, min 0.0
+00115 raw t1n: dtype float64, exactly-zero 55.8%, min 0.0
+00115 raw t2f: dtype float64, exactly-zero 61.1%, min 0.0
+00115 raw t2w: dtype float64, exactly-zero 45.7%, min 0.0
+00077 alignment report: {"t1c": {"reference": true}, "t1n": {"rotation_deg": [-0.093, 0.16, 0.061], "translation_mm": [0.057, 0.014, 0.055], "center_mm": [119.5, -119.5, 77.0], "metric": -0.84765}, "t2f": {"rotation_deg": [0.387, 0.167, -3.013], "translation_mm": [-2.035, -0.025, -0.226], "center_mm": [119.5, -119.5, 77.0], "metric": -0.54684}, "t2w": {"rotation_deg": [-0.196, 0.232, -2.867], "translation_mm": [-1.884, 0.015, -0.043], "center_mm": [119.5, -119.5, 77.0], "metric": -0.66427}}
+00077 t1c: raw dtype float64 zero 53.5% | realigned dtype float64 zero 53.5% | affine equal True | corr with raw 1.0000
+00077 t1n: raw dtype float64 zero 53.7% | realigned dtype float64 zero 50.8% | affine equal True | corr with raw 0.9994
+00077 t2f: raw dtype float64 zero 60.9% | realigned dtype float64 zero 57.5% | affine equal True | corr with raw 0.9921
+00077 t2w: raw dtype float64 zero 56.4% | realigned dtype float64 zero 51.3% | affine equal True | corr with raw 0.9937
+raw t1c+t1n, realigned t2f+t2w: ET/TC/WT [0.0, 0.863, 0.861] mean 0.5749 | status ok mode R* warnings []
+all four realigned: ET/TC/WT [0.0, 0.863, 0.861] mean 0.5746 | status ok mode R* warnings []

@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "C:\Users\ahmed\wt-align\08_preprocessing\tools\check_alignment.py", line 182, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\ahmed\wt-align\08_preprocessing\tools\check_alignment.py", line 177, in main
+    c = [] if a.skip_c else check_c(sids[:5])
+                            ~~~~~~~^^^^^^^^^^
+  File "C:\Users\ahmed\wt-align\08_preprocessing\tools\check_alignment.py", line 132, in check_c
+    row[cond] = rstar_mean_dice(paths, gt, d)
+                ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\ahmed\wt-align\08_preprocessing\tools\check_alignment.py", line 104, in rstar_mean_dice
+    raise RuntimeError(f"rstar failed: {r.stderr[-800:]}")
+RuntimeError: rstar failed: rstar: input rejected: sequence t1c has only 4% exactly-zero voxels, so it looks like it is not skull-stripped (BraTS volumes are 30-60% background); skull-strip the scan first
+
