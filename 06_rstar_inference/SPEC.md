@@ -281,6 +281,6 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [x] Req 53: cyst_override exact on hand-built volumes, no mutation, dtype, count, shape check
 - [x] Req 54: pipeline applies the override after fusion in both nnU-Net modes; diagnostics count; nothing changes when off
 - [x] Req 55: real-data reference = F+C within 0.005; README documents the override and the flags/cleanup result
-- [ ] Req 56: multi-checkpoint nnunet manifest entry validated; bad forms raise; one model folder
-- [ ] Req 57: every fold hash verified before any open; parameter sets in order; one info item per fold
-- [ ] Req 58: 226-patient manifest reproduces F5 + cyst override on 3 fresh-30 patients (slow); README documents both
+- [x] Req 56: multi-checkpoint nnunet manifest entry validated; bad forms raise; one model folder
+- [x] Req 57: every fold hash verified before any open; parameter sets in order; one info item per fold
+- [x] Req 58: 226-patient manifest reproduces F5 + cyst override on 3 fresh-30 patients (slow); README documents both
