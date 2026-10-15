@@ -261,12 +261,12 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [x] Req 41: cleanup runs before the 500 mm³ rule
 - [x] Req 42: CLI --fragment-cleanup
 - [x] Req 43: real-data Dice change <= 0.01 and no small components left (slow); README documents the option
-- [ ] Req 44: nnunet config default/validation; optional manifest entry validated; missing entry and hash mismatch errors
-- [ ] Req 45: fuse_weighted exact, equals fuse for two members, ties, invalid inputs raise
-- [ ] Req 46: off by default: predictor never touched; every output identical to today's (R*, 3D-only, flags/cleanup on/off)
-- [ ] Req 47: nnunet_probs axis reversal consistent in and out, (4,Z,Y,X) input, spacing, absent channels zero, no mutation
-- [ ] Req 48: R*+nnU-Net and 3D+nnU-Net modes: members called, labels exact, statuses and warnings, agreement guard
-- [ ] Req 49: review flags use the weighted ET probability; cleanup composes as in Req 40
-- [ ] Req 50: CLI --nnunet; report mode
-- [ ] Req 51: real-data F scores reproduced within 0.005 (slow); nnU-Net hash matches
-- [ ] Req 52: README documents the option, results, modes, caveats, install; pre-existing tests pass unedited
+- [x] Req 44: nnunet config default/validation; optional manifest entry validated; missing entry and hash mismatch errors
+- [x] Req 45: fuse_weighted exact, equals fuse for two members, ties, invalid inputs raise
+- [x] Req 46: off by default: predictor never touched; every output identical to today's (R*, 3D-only, flags/cleanup on/off)
+- [x] Req 47: nnunet_probs axis reversal consistent in and out, (4,Z,Y,X) input, spacing, absent channels zero, no mutation
+- [x] Req 48: R*+nnU-Net and 3D+nnU-Net modes: members called, labels exact, statuses and warnings, agreement guard
+- [x] Req 49: review flags use the weighted ET probability; cleanup composes as in Req 40
+- [x] Req 50: CLI --nnunet; report mode
+- [x] Req 51: real-data F scores reproduced within 0.005 (slow); nnU-Net hash matches
+- [x] Req 52: README documents the option, results, modes, caveats, install; pre-existing tests pass unedited
