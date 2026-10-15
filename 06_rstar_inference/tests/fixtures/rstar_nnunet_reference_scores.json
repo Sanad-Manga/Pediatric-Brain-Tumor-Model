@@ -1,0 +1,23 @@
+{
+  "_comment": "Arm F per-patient Dice from the 2026-10-11 pre-registered nnU-Net test (PREREGISTERED_nnunet_2026-10-11, scores_nnunet.json): (2D + 3D + nnU-Net)/3, background x0.5, ET rule 500 mm3. Values are [ET, TC, WT]; nnU-Net probabilities came from nnUNetv2_predict (file path).",
+  "patients": {
+    "BraTS-PED-00077-000": {
+      "et": 1.0,
+      "nc": 0.9226078378620751,
+      "wt": 0.9226078378620751,
+      "true_et_voxels": 0
+    },
+    "BraTS-PED-00103-000": {
+      "et": 0.6942038640906063,
+      "nc": 0.8457637096409002,
+      "wt": 0.8457637096409002,
+      "true_et_voxels": 1213
+    },
+    "BraTS-PED-00136-000": {
+      "et": 0.8412230458221024,
+      "nc": 0.5206801841828904,
+      "wt": 0.5748607180098316,
+      "true_et_voxels": 12928
+    }
+  }
+}

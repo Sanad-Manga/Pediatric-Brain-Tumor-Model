@@ -25,6 +25,8 @@ argmax and a small enhancing-tumour clean-up rule.
 | all four | `R*` | 2D ensemble + 3D family, fused, small-ET rule |
 | one to three | `3D-only` | the 3D family only (the 2D models collapse without every sequence: 0.14 without FLAIR), plain argmax, small-ET rule |
 
+With the optional nnU-Net member on, the two modes become `R*+nnU-Net` and `3D+nnU-Net` (see below).
+
 `status` is `ok` or `review`. `review` means: two or more sequences absent (not validated), or the 2D and 3D outlines
 disagree (whole-tumour agreement below 0.70; below 0.10 the warning names a possible 2D collapse or a frame/orientation
 error). The agreement flag is a weak signal (flagged patients scored 0.15-0.18 lower on average, but it catches few failures),
@@ -70,6 +72,35 @@ unchanged on the 30-patient clean test and raised the official BraTS-PED lesion-
 lesion-wise metric counts every stray fragment as a false lesion. The size of 200 was chosen on the held-out patients,
 so the option stays off by default until cross-validation confirms it.
 
+## nnU-Net member (optional, off by default)
+
+With `RStarConfig(nnunet=True)` (CLI: `--nnunet`), a third model joins the fusion: a 1,000-epoch nnU-Net (`3d_fullres`,
+trained on the same 145 patients as the 3D family). Modes become:
+
+| Sequences | Mode | Recipe |
+|---|---|---|
+| all four | `'R*+nnU-Net'` | (2D + 3D + nnU-Net) / 3, background x0.5, argmax, 500 mm³ rule |
+| one or more absent | `'3D+nnU-Net'` | (3D + nnU-Net) / 2, background x0.5, argmax, 500 mm³ rule (2D not run) |
+
+Statuses, warnings, the 2D-vs-3D agreement guard, review flags and fragment cleanup work as in R*. Evidence (all
+pre-registered, US BraTS-PEDs only):
+
+- **Clean test (`PREREGISTERED_nnunet_2026-10-11`):** 30 untouched patients 0.844 vs R* 0.805 (+0.039, 95% CI +0.017 to
+  +0.066); 81 held-out patients 0.843 vs 0.810.
+- **Cross-validation (`PREREGISTERED_cv_nnunet_2026-10-11`):** on 226 patients, 5 folds, nnU-Net beats the 3D family by
+  +0.087 (CI +0.073 to +0.102) in every fold.
+- **Robustness (`PREREGISTERED_nn_robustness_2026-10-15`):** on the 30 untouched patients the fusion stays 0.03-0.08 above
+  R* under 1-3 mm sequence misalignment, seven simulated scanner differences, and each missing sequence (where
+  3D + nnU-Net beats R*'s 3D-only fallback for all four sequences).
+
+Caveats: the review-flag threshold (0.7) and the cleanup size (200) were chosen for R* and are not validated with the
+nnU-Net fusion. The option is off by default; switching the default is a separate decision.
+
+Needs `nnunetv2` (`pip install nnunetv2==2.8.1`, imported only when the option is on) and the model folder
+`01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/` (`plans.json`, `dataset.json`,
+`fold_all/checkpoint_final.pth`) under the models root; the checkpoint is pinned by SHA-256 like the others. The network is
+rebuilt with nnU-Net's standard trainer class, so the training-time trainer variant is not needed.
+
 ## Checkpoints
 
 Checkpoints are not in git. `config/models.default.json` pins each file by path (relative to the models root: argument, else
@@ -81,4 +112,5 @@ Use exactly these files: retraining a 3D member changes the fusion, and the reci
 ```bash
 python -m pytest 06_rstar_inference/tests          # CPU only, stub models, no data
 RSTAR_MODELS_ROOT=... RSTAR_TEST_DATA=... python -m pytest 06_rstar_inference/tests/test_regression.py   # real checkpoints + 3 patients
+RSTAR_MODELS_ROOT=... RSTAR_TEST_DATA=... python -m pytest 06_rstar_inference/tests/test_nnunet_member.py  # + nnU-Net (needs nnunetv2)
 ```

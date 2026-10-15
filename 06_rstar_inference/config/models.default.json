@@ -26,5 +26,10 @@
       "path": "01_model_federated/checkpoints_best/session3_E_ce_sd25_final_ep317.pt",
       "sha256": "69f0a57e1675b0a310acddbd14db1acafd216fe1ac4d3c8198c9fde283cd4617"
     }
-  ]
+  ],
+  "nnunet": {
+    "name": "nnunet_Dataset501_3d_fullres_1000ep",
+    "path": "01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/fold_all/checkpoint_final.pth",
+    "sha256": "c2ee0064f90fa240db5f39f8c8dcae38a5c4ab3518bbd215aa7ef727788d5fe5"
+  }
 }

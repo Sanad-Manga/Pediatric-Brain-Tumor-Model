@@ -20,6 +20,24 @@ def fuse(p2: np.ndarray, p3: np.ndarray, w3d: float, background_scale: float) ->
     return argmax_labels(acc)
 
 
+def fuse_weighted(probs_list, weights, background_scale: float) -> np.ndarray:
+    """probs = sum(w_i * p_i), background probability multiplied by `background_scale`, then argmax (SPEC Addendum 4).
+    The weights must be non-negative, one per volume, and sum to 1."""
+    probs_list = [np.asarray(p, dtype=np.float32) for p in probs_list]
+    weights = [float(w) for w in weights]
+    if len(probs_list) != len(weights) or not probs_list:
+        raise ValueError(f"need one weight per probability volume, got {len(weights)} weights for {len(probs_list)} volumes")
+    if any(p.shape != probs_list[0].shape for p in probs_list):
+        raise ValueError(f"probability volumes must have the same shape, got {[p.shape for p in probs_list]}")
+    if any(not np.isfinite(w) or w < 0 for w in weights) or abs(sum(weights) - 1.0) > 1e-6:
+        raise ValueError(f"weights must be non-negative and sum to 1, got {weights}")
+    acc = np.zeros_like(probs_list[0])
+    for p, w in zip(probs_list, weights):
+        acc += np.float32(w) * p
+    acc[0] *= np.float32(background_scale)
+    return argmax_labels(acc)
+
+
 def apply_small_et_rule(labels: np.ndarray, min_mm3: float, voxel_mm3: float):
     """Relabel enhancing tumour (1) as non-enhancing (2) when 0 < total ET volume < min_mm3.
     Returns (new labels, ET voxels before the rule, relabelled?). The input is never modified."""
