@@ -6,6 +6,8 @@
 >
 > **Addendum 3 (2026-10-04) - optional fragment cleanup, off by default:** §2, §3, §4 (Req 37-43), §5, §6 and §7 were extended. Under the official BraTS-PED lesion-wise metric every predicted component that touches no real tumour counts as a whole false lesion; R* leaves many tiny stray fragments (held-out tumour core: 110 in 23 of 81 patients, median 4 voxels). A pre-registered test (`PREREGISTERED_fragments_hybrid_2026-10-04`, cleanup size chosen on held-out only) found that removing components under 200 voxels before the 500 mm³ rule leaves legacy Dice unchanged on fresh-30 (0.8050 vs 0.8051) and raises lesion-wise Dice by +0.074 (CI +0.025 to +0.131); combined with review flags (`PREREGISTERED_combo_2026-10-04`) silent false ET spots fell 5 -> 2 (fresh-30) and 22 -> 2 (held-out). The size was chosen after seeing these sets, so the option ships off by default pending cross-validation.
 >
+> **Addendum 4 (2026-10-15) - nnU-Net as an optional third member, off by default:** §2, §3, §4 (Req 44-52), §5, §6 and §7 were extended. A 1,000-epoch nnU-Net (`3d_fullres`, trained on the same 145 patients) was tested in three pre-registered steps: (1) `PREREGISTERED_nnunet_2026-10-11`: the 3-way fusion F = (2D + 3D + nnU-Net)/3, background x0.5, ET rule, scored fresh-30 0.844 vs R* 0.805 (+0.039, CI +0.017..+0.066) and held-out 0.843 vs 0.810; (2) `PREREGISTERED_cv_nnunet_2026-10-11`: 5-fold cross-validation on 226 patients, nnU-Net (250 ep) beats the 3D family by +0.087 (CI +0.073..+0.102, all 5 folds); (3) `PREREGISTERED_nn_robustness_2026-10-15`: F stays at least 0.03 above R* under 1-3 mm sequence misalignment, seven scanner differences and each missing sequence (where 0.5 x 3D + 0.5 x nnU-Net beats today's 3D-only fallback for all four sequences). This addendum adds that recipe to `RStarSegmenter` behind `nnunet=True`. With the option off, every output is byte-identical to today's. Turning it on by default is a separate decision.
+>
 ## 1. Goal
 A standalone, guard-railed Python package (`rstar`) that segments one co-registered BraTS-space pediatric brain MRI with the 2D+3D fusion recipe measured on 2026-09-26 (0.805 mean Dice on 30 patients that were never used to train or choose anything, against 0.711 for the shipped 2D ensemble), and fails loudly, not silently, when its inputs or its own geometry are wrong.
 
@@ -41,6 +43,17 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
   - When `fragment_cleanup` is true, `segment` applies it to the fused labels (R* mode) or the 3D argmax (3D-only mode) **after** review flags are computed and **before** the 500 mm³ rule; `diagnostics` gains `fragment_voxels_removed` (whole-tumour voxels set to background) and `et_fragment_voxels_relabelled` only when it is on.
   - CLI: `--fragment-cleanup` turns it on.
 
+- **nnU-Net member (Addendum 4):**
+  - `RStarConfig` gains `nnunet: bool = False`.
+  - The manifest may hold an optional `nnunet` entry `{name, path, sha256}` whose `path` is the `checkpoint_final.pth` of a trained nnU-Net model folder (relative to `models_root`, like every entry); the model folder is the checkpoint's grandparent (it holds `plans.json` and `dataset.json`). The default manifest lists the 1,000-epoch Dataset501 model at `01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/fold_all/checkpoint_final.pth` (a git-ignored folder). The SHA-256 is verified before nnU-Net opens the file (`verify_hashes=False` overrides).
+  - New module `rstar/nnunet_member.py`: `load_nnunet(cfg)` builds an `nnunetv2` `nnUNetPredictor` (tile step 0.5, Gaussian weighting, mirroring on, fold `all`, `checkpoint_final.pth`; `nnunetv2` is imported only here, only when the option is on); `nnunet_probs(predictor, volume, present)` zeroes absent channels, passes the scan as `(4, Z, Y, X)` (axes reversed, the order nnU-Net's own NIfTI reader produces) with spacing `[1, 1, 1]`, and returns the probabilities reversed back to `(5, X, Y, Z)` float32.
+  - Fusion: new `fusion.fuse_weighted(probs_list, weights, background_scale)` = argmax of `sum(w_i p_i)` with the background multiplied by `background_scale`.
+  - **Cyst override (Addendum 4b, 2026-10-15 evening):** with `nnunet=True`, right after the weighted fusion (before review flags, cleanup and the 500 mm³ rule) every voxel where nnU-Net's own argmax is cyst (label 3) becomes 3 (`fusion.cyst_override(labels, pn)`). Source: `PREREGISTERED_cyst_override_2026-10-15` (held-out cyst Dice 0.242 -> 0.331, CI +0.037..+0.152; confirmed on 145 independent cross-validation patients, +0.016, CI +0.008..+0.027; the usual Dice unchanged). `diagnostics` gains `cyst_override_voxels` (voxels changed) only when `nnunet=True`.
+  - **Several nnU-Net folds (Addendum 4c, 2026-10-15 evening):** the manifest's `nnunet` entry may instead of `path`/`sha256` hold `checkpoints`, a non-empty list of `{path, sha256}` (fold checkpoints of one model folder, e.g. `fold_0/checkpoint_final.pth` ... `fold_4/...`); every file is hash-verified before it is opened, and nnU-Net averages the folds' predictions (its own multi-fold ensembling: one network, the list of parameter sets in manifest order). The model folder is the first checkpoint's grandparent; all checkpoints must share it. A second manifest, `config/models.nnunet226.json`, lists the 5-fold 226-patient ensemble (`PREREGISTERED_ens5_2026-10-15`: fresh-30 R*+nnU-Net 0.852 vs 0.844 with the 145-patient model, +0.007, CI +0.003..+0.013); the default manifest keeps the 145-patient model, which is the only one that can be tested on held-out patients. Choosing between them is a deployment decision outside this spec.
+  - With `nnunet=True`: all four sequences present → mode `'R*+nnU-Net'`, labels = `fuse_weighted([p2, p3, pn], [1/3, 1/3, 1/3], background_scale)`; any sequence absent → mode `'3D+nnU-Net'`, the 2D models are not run, labels = `fuse_weighted([p3, pn], [0.5, 0.5], background_scale)` (both members receive the absent channels as zeros). Statuses, warnings (the missing-sequence warning names the new mode), the 2D-vs-3D agreement guard, the 500 mm³ rule, review flags (ET probability = the same weighted mean of the members' ET probabilities) and fragment cleanup apply exactly as in R*/3D-only mode. `diagnostics['checkpoints']` also lists the nnU-Net checkpoint.
+  - `RStarSegmenter(..., nnunet_predictor=None)`: an object with nnU-Net's `predict_single_npy_array(input_image, image_properties, segmentation_previous_stage, output_file_truncated, save_or_return_probabilities)` method can be injected (tests use a stub); it is loaded from the manifest only when `nnunet=True` and none is given.
+  - CLI: `--nnunet` turns it on.
+
 ## 3. Out of Scope
 - Registration, skull-stripping, resampling to BraTS space, DICOM I/O, NIfTI header repair.
 - Any change to sections 01, 03 or 05 (`05_frontend_demo` is not touched; a later integration step is the maintainers' call).
@@ -48,6 +61,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - Uncertainty calibration or a learned confidence score. The agreement flag is a weak soft signal only; the module never withholds labels because of low agreement (one genuine 2D collapse on a correctly aligned held-out patient had agreement 0.000).
 - **Any claim of clinical validity or of performance on non-US data.** Reported numbers are US BraTS-PEDs only.
 - Bundling checkpoints into the repository.
+- **(Addendum 4)** Turning `nnunet` on by default; training nnU-Net or bundling its weights in git; re-tuning the review-flag threshold or cleanup size for the new fusion (they were chosen for R*; documented as unvalidated with nnU-Net); weights other than the measured equal thirds / halves; changes to `05_frontend_demo` (adding the new option to the demo is a separate step).
 - **(Addendum 3)** Turning cleanup on by default; flagging the removed pieces (tested as COMBO-F: no measurable gain); per-region or per-label sizes; any change to `05_frontend_demo` beyond what Addendum 2 already excludes.
 - **(Addendum 2)** Changing the labels, status or warnings because of flags; per-spot model agreement inside the pipeline (it would need four extra 3D passes; the chosen rule does not use it, so `models_agree` is `null`); flags on by default; any change to `05_frontend_demo` or the deployed comparison package; the CLI writing flags without being asked.
 - **(Addendum 1)** Wiring review flags into `RStarSegmenter`, its CLI or its outputs; any change to existing `rstar` modules, the deployed models or the Oct-6 comparison package; choosing threshold values in code (evaluation runs pass them explicitly; defaults exist only as documented keyword defaults where stated); learned/calibrated uncertainty; any evaluation script with data paths (those live outside the repository); the Streamlit display (issue #44).
@@ -96,6 +110,21 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 41. Order: on a stub case where removing an ET fragment brings the total ET below 500 mm³, the remaining ET is relabelled by the 500 mm³ rule (cleanup runs first) and `et_relabelled` is true.
 42. CLI: `--fragment-cleanup` builds the segmenter with `fragment_cleanup=True` (and an injected segmenter gets it set); without the option it is built with `fragment_cleanup=False`.
 43. Real data and docs (slow part skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): on three fresh-30 patients, `fragment_cleanup=True` changes the per-patient mean legacy Dice (ET, TC, WT; rule applied) by no more than 0.01 against cleanup off, and never leaves a whole-tumour component smaller than `cleanup_min_voxels`. README documents the option, the size, its source tests, and that it is off by default pending cross-validation.
+44. Config and manifest: `RStarConfig().nnunet is False`; a non-bool `nnunet` raises `ValueError` naming the field. The manifest validator accepts a manifest without `nnunet` and checks an `nnunet` entry like every other entry (relative path, 64-hex SHA-256); the default manifest has one. `nnunet=True` with a manifest lacking the entry raises `ValueError` mentioning `nnunet`; a hash mismatch raises `ModelIntegrityError` before `nnunetv2` loads the file.
+45. `fuse_weighted` equals an independent NumPy computation on random probability volumes; `fuse_weighted([p2, p3], [1 - w3d, w3d], s)` equals `fuse(p2, p3, w3d, s)` exactly; ties go to the lowest class; mismatched shapes, a weight count different from the volume count, negative weights or weights not summing to 1 (1e-6) raise `ValueError`.
+46. Off by default and unchanged: with stub models and the default config, `segment` never touches a predictor (an injected stub that raises is never called), and labels, mode, status, warnings and diagnostics (except `elapsed_s`) equal those of a segmenter built without any predictor, in R* and 3D-only modes, with flags and cleanup on or off.
+47. Geometry: `nnunet_probs` with a stub predictor that returns, per voxel, the softmax of a pointwise function of its input gives exactly the same result as applying that function to the `(4, X, Y, Z)` volume directly (so the axis reversal in and out is consistent), the input to the stub has shape `(4, Z, Y, X)`, spacing `[1.0, 1.0, 1.0]`, absent channels are exactly zero there, and the input volume is not modified.
+48. Modes with `nnunet=True`: all present → mode `'R*+nnU-Net'`, 2D, 3D and the predictor each called once, labels equal `fuse_weighted([p2, p3, pn], [1/3]*3, 0.5)` then the 500 mm³ rule; one absent → mode `'3D+nnU-Net'`, the 2D stub never called, labels equal `fuse_weighted([p3, pn], [0.5, 0.5], 0.5)` then the rule, status `'ok'` and the warning names the absent sequence and the mode; two absent → status `'review'`; the agreement guard still sets `'review'` for 2D-vs-3D agreement below 0.70.
+49. Options compose: with `nnunet=True` and `review_flags=True`, the flagged ET probability is the weighted mean of the members' ET probabilities (checked on a controllable stub case, 1e-6); with `fragment_cleanup=True`, labels equal `apply_small_et_rule(remove_fragments(pre_rule_labels))` as in Req 40.
+50. CLI: `--nnunet` builds the segmenter with `nnunet=True` (an injected segmenter gets it set); without it, `nnunet=False`; the JSON report's `mode` is the new mode name.
+51. Real data (slow, skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set): for three fresh-30 patients, `nnunet=True` end to end reproduces the per-patient mean legacy Dice (ET, TC, WT; rule applied) of arm F in `tests/fixtures/rstar_nnunet_reference_scores.json` (from `nnunet/scores_nnunet.json`, 2026-10-11) within 0.005, and the default manifest's nnU-Net hash matches the real file.
+53. `cyst_override(labels, pn)` on hand-built volumes: exactly the voxels where `argmax(pn) == 3` become 3, every other voxel is unchanged, the input is not modified, the dtype is kept, and the returned count equals the voxels whose label changed; mismatched shapes raise `ValueError`.
+54. Pipeline (Addendum 4b): with `nnunet=True`, in both nnU-Net modes, labels equal `apply_small_et_rule(cyst_override(fuse_weighted(...), pn))` and `diagnostics['cyst_override_voxels']` equals the count; review flags and cleanup see the overridden labels; with `nnunet=False` there is no `cyst_override_voxels` key and nothing changes (Req 46 still holds).
+55. Real data and docs (Addendum 4b): Req 51's reference is the pre-registered F+C arm (`nnunet/cyst_override.json`), still within 0.005; README states the cyst override with its evidence, and replaces the "flags/cleanup unvalidated" caveat with the result of `PREREGISTERED_nn_flags_cleanup_2026-10-15` (cleanup does not carry over: it deleted one real small lesion on fresh-30; flags never change labels and stay optional).
+56. Manifest (Addendum 4c): an `nnunet` entry with `checkpoints` validates each item like any entry (relative path, 64-hex SHA-256); an empty list, an entry with both `path` and `checkpoints`, or neither, raises `ValueError` mentioning `nnunet`; checkpoints in different model folders raise `ValueError`. The single-`path` form is unchanged.
+57. Loading (Addendum 4c): with a `checkpoints` entry, `load_nnunet` verifies every hash before opening any file (a mismatch in the last one raises `ModelIntegrityError` and no checkpoint is opened), passes the predictor one parameter set per checkpoint in manifest order, and returns one info item per checkpoint (so `diagnostics['checkpoints']` lists every fold).
+58. Real data and docs (Addendum 4c; slow, skipped unless `RSTAR_MODELS_ROOT` and `RSTAR_TEST_DATA` are set and the fold files exist): with `config/models.nnunet226.json`, three fresh-30 patients reproduce the pre-registered F5 arm with the cyst override (`tests/fixtures/rstar_nnunet226_reference_scores.json`) within 0.005; README documents both manifests, the evidence, and that the 226-patient ensemble saw the held-out patients in training.
+52. Docs and isolation: README documents the option, the three pre-registered results with their numbers, the modes, that it is off by default, that the review-flag threshold and cleanup size were chosen for R* and are unvalidated with nnU-Net, and how to install `nnunetv2`; every pre-existing test passes unedited.
 28. Isolation and regression: the only changed or new files are `rstar/review_flags.py`, `tests/test_review_flags.py` and `SPEC.md`; every other file in `06_rstar_inference/` is byte-identical; `rstar/pipeline.py` does not import `review_flags`; every pre-existing `06_rstar_inference` test passes unedited.
 
 **Assumption:** The negative-voxel limits (1% warn, 5% error) were set after the regression run showed that real BraTS-PEDs scans do contain negative voxels (0.03-0.47% in the four sequences of one fresh patient); the first draft of this spec wrongly rejected any negative value.
@@ -105,6 +134,10 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 **Assumption:** The module returns a single case per call, on one device, in float32; memory use is a full-resolution five-class probability volume per branch (about 180 MB each at 240×240×155).
 **Assumption:** Voxel volume is 1 mm³ for the BraTS grid; the mm³ form of the 500-voxel rule is the same rule expressed in physical units.
 
+**Assumption (Addendum 4):** The 3-way weights are equal thirds and the missing-sequence pair equal halves, both with background x0.5, because those are the exact recipes the pre-registered tests measured; no other weights were tried on the test sets.
+**Assumption (Addendum 4):** nnU-Net receives the raw intensities (its own z-score per channel), not the 2D or 3D preprocessing; an absent channel is all zeros, exactly as in the robustness test (`miss_*`).
+**Assumption (Addendum 4):** The 2D-vs-3D agreement guard is kept unchanged: it guards the 2D branch's known collapse; an nnU-Net-based guard was not studied.
+**Assumption (Addendum 4):** Req 51 allows 0.005, not 0.002: nnU-Net's sliding-window inference on a GPU is not bit-deterministic, and the reference came from the file-based `nnUNetv2_predict` path (the in-memory path must agree within that).
 **Assumption (Addendum 3):** Cleanup runs after flags are computed so the flags keep seeing everything the model predicted (the combination tested); it runs before the 500 mm³ rule so removed ET fragments no longer count toward the patient's ET total, exactly as in the test.
 **Assumption (Addendum 3):** Removing a whole-tumour component removes all its labels; an ET component is relabelled non-enhancing rather than removed, because it sits inside tumour the cleanup kept.
 **Assumption (Addendum 2):** Flags leave `status` alone: a flagged spot is information for the reader, and tying it to `'review'` would change the deployed output and make most patients `'review'` (about 0.5 flagged spots per patient on fresh-30).
@@ -131,6 +164,7 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 │   ├── models.py                 # hash-verified loading of the 2D ensemble and the 3D family
 │   ├── fusion.py                 # fuse, small-ET rule (mm^3), agreement, remove_fragments (addendum 3)
 │   ├── review_flags.py           # spot-level review flags + per-spot error scorecard (addendum 1; used by pipeline.py when review_flags is on, addendum 2)
+│   ├── nnunet_member.py          # optional nnU-Net member: hash-verified load, axis handling (addendum 4)
 │   ├── guards.py                 # agreement statuses, self_check, SelfCheckError
 │   ├── pipeline.py               # RStarSegmenter.segment / segment_paths
 │   └── cli.py                    # python -m rstar
@@ -146,7 +180,8 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
     ├── test_review_flags.py      # Req 22-28 (addendum 1)
     ├── test_pipeline_review.py   # Req 29-36 (addendum 2)
     ├── test_fragment_cleanup.py  # Req 37-43 (addendum 3)
-    └── fixtures/rstar_reference_scores.json
+    ├── test_nnunet_member.py     # Req 44-52 (addendum 4)
+    └── fixtures/rstar_reference_scores.json, rstar_nnunet_reference_scores.json
 ```
 
 ## 6. Edge Cases
@@ -185,6 +220,10 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 | Cleanup on, no tumour predicted (Addendum 3) | Labels all 0; both cleanup diagnostics 0 |
 | Cleanup on, the whole prediction is one small component (Addendum 3) | Removed: labels all 0 (the patient gets no tumour) |
 | Cleanup removes an ET fragment and the remaining ET falls below 500 mm³ (Addendum 3) | The rule then relabels the remaining ET; `et_relabelled` true |
+| `nnunet=True` but `nnunetv2` not installed (Addendum 4) | `ImportError` at construction naming `nnunetv2` and how to install it |
+| `nnunet=True`, manifest has no `nnunet` entry (Addendum 4) | `ValueError` mentioning `nnunet` |
+| `nnunet=True`, one sequence absent (Addendum 4) | `'3D+nnU-Net'`: 3D + nnU-Net halves, 2D not run, status `'ok'` + warning |
+| `nnunet=True`, 2D collapses (agreement < 0.10) (Addendum 4) | Labels from the 3-way fusion still returned; status `'review'` with the stronger warning, as in R* |
 ## 7. Done Checklist
 
 - [x] Req 1: `RStarConfig` defaults and validation errors
@@ -230,3 +269,18 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [x] Req 41: cleanup runs before the 500 mm³ rule
 - [x] Req 42: CLI --fragment-cleanup
 - [x] Req 43: real-data Dice change <= 0.01 and no small components left (slow); README documents the option
+- [x] Req 44: nnunet config default/validation; optional manifest entry validated; missing entry and hash mismatch errors
+- [x] Req 45: fuse_weighted exact, equals fuse for two members, ties, invalid inputs raise
+- [x] Req 46: off by default: predictor never touched; every output identical to today's (R*, 3D-only, flags/cleanup on/off)
+- [x] Req 47: nnunet_probs axis reversal consistent in and out, (4,Z,Y,X) input, spacing, absent channels zero, no mutation
+- [x] Req 48: R*+nnU-Net and 3D+nnU-Net modes: members called, labels exact, statuses and warnings, agreement guard
+- [x] Req 49: review flags use the weighted ET probability; cleanup composes as in Req 40
+- [x] Req 50: CLI --nnunet; report mode
+- [x] Req 51: real-data F scores reproduced within 0.005 (slow); nnU-Net hash matches
+- [x] Req 52: README documents the option, results, modes, caveats, install; pre-existing tests pass unedited
+- [x] Req 53: cyst_override exact on hand-built volumes, no mutation, dtype, count, shape check
+- [x] Req 54: pipeline applies the override after fusion in both nnU-Net modes; diagnostics count; nothing changes when off
+- [x] Req 55: real-data reference = F+C within 0.005; README documents the override and the flags/cleanup result
+- [x] Req 56: multi-checkpoint nnunet manifest entry validated; bad forms raise; one model folder
+- [x] Req 57: every fold hash verified before any open; parameter sets in order; one info item per fold
+- [x] Req 58: 226-patient manifest reproduces F5 + cyst override on 3 fresh-30 patients (slow); README documents both

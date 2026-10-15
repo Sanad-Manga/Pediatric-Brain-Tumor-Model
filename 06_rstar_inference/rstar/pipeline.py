@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from . import fusion, guards, models as model_loading, preprocess, review_flags
+from . import fusion, guards, models as model_loading, nnunet_member, preprocess, review_flags
 from .config import SEQUENCES, RStarConfig
 from .contract import ContractError, validate_input
 
@@ -20,7 +20,7 @@ _SELF_CHECK_DONE = {"done": False}      # one automatic self-check per process
 @dataclass
 class RStarResult:
     labels: np.ndarray | None
-    mode: str                                   # 'R*' or '3D-only'
+    mode: str                                   # 'R*' or '3D-only'; with nnunet=True 'R*+nnU-Net' or '3D+nnU-Net'
     status: str                                 # 'ok' or 'review'
     warnings: list = field(default_factory=list)
     diagnostics: dict = field(default_factory=dict)
@@ -35,7 +35,8 @@ def _softmax(logits: np.ndarray, axis: int = 1) -> np.ndarray:
 
 
 class RStarSegmenter:
-    def __init__(self, config: RStarConfig | None = None, models_2d=None, models_3d=None, run_self_check=None):
+    def __init__(self, config: RStarConfig | None = None, models_2d=None, models_3d=None, run_self_check=None,
+                 nnunet_predictor=None):
         self.cfg = config or RStarConfig()
         injected = models_2d is not None and models_3d is not None
         self._checkpoints: list = []
@@ -45,8 +46,12 @@ class RStarSegmenter:
         if models_3d is None:
             models_3d, info_3d = model_loading.load_3d_family(self.cfg)
             self._checkpoints += info_3d
+        if self.cfg.nnunet and nnunet_predictor is None:     # SPEC Addendum 4: loaded only when the option is on
+            nnunet_predictor, info_nn = nnunet_member.load_nnunet(self.cfg)
+            self._checkpoints += info_nn
         self.models_2d = list(models_2d)
         self.models_3d = list(models_3d)
+        self.nnunet_predictor = nnunet_predictor
         self.device = self.cfg.resolved_device()
         if run_self_check is True:
             self.self_check()
@@ -108,31 +113,49 @@ class RStarSegmenter:
         present, warnings = validate_input(volume, present, self.cfg)
         vol = np.asarray(volume, dtype=np.float32)
         missing = [SEQUENCES[c] for c in range(len(SEQUENCES)) if not present[c]]
+        use_nn = self.cfg.nnunet
         if missing:
-            mode = "3D-only"
+            mode = "3D+nnU-Net" if use_nn else "3D-only"
             warnings.append(
-                f"sequence(s) {', '.join(missing)} absent: 3D-only mode (the 2D models collapse without every sequence)"
+                f"sequence(s) {', '.join(missing)} absent: {mode} mode (the 2D models collapse without every sequence)"
                 + ("; accuracy with two or more sequences missing is not validated" if len(missing) >= 2 else ""))
         else:
-            mode = "R*"
+            mode = "R*+nnU-Net" if use_nn else "R*"
 
+        if use_nn and self.nnunet_predictor is None:        # option switched on after construction (e.g. by the CLI)
+            self.nnunet_predictor, info_nn = nnunet_member.load_nnunet(self.cfg)
+            self._checkpoints += info_nn
         p3 = self._probs_3d(vol, present)
+        pn = nnunet_member.nnunet_probs(self.nnunet_predictor, vol, present) if use_nn else None
         agree = None
         status = "review" if len(missing) >= 2 else "ok"
-        if mode == "R*":
+        if not missing:
             p2 = self._probs_2d(vol)
             agree = fusion.agreement(p2, p3)
-            labels = fusion.fuse(p2, p3, self.cfg.w3d, self.cfg.background_scale)
+            if use_nn:                                      # SPEC Addendum 4: the measured 3-way recipe, equal thirds
+                members, weights = [p2, p3, pn], [1.0 / 3, 1.0 / 3, 1.0 / 3]
+                labels = fusion.fuse_weighted(members, weights, self.cfg.background_scale)
+            else:
+                labels = fusion.fuse(p2, p3, self.cfg.w3d, self.cfg.background_scale)
             agree_status, agree_warnings = guards.agreement_status(agree, self.cfg)
             warnings += agree_warnings
             if agree_status == "review":
                 status = "review"
+        elif use_nn:                                        # SPEC Addendum 4: measured missing-sequence fallback, halves
+            members, weights = [p3, pn], [0.5, 0.5]
+            labels = fusion.fuse_weighted(members, weights, self.cfg.background_scale)
         else:
             labels = fusion.argmax_labels(p3)               # measured 3D-only path: plain argmax, no background scaling
+        cyst_changed = None
+        if use_nn:                                          # SPEC Addendum 4b: nnU-Net decides cysts
+            labels, cyst_changed = fusion.cyst_override(labels, pn)
 
         review_mask = review_spots = None
         if self.cfg.review_flags:                           # from the labels BEFORE the 500 mm^3 rule (it may erase them)
-            et_prob = p3[1] if mode == "3D-only" else self.cfg.w3d * p3[1] + (1.0 - self.cfg.w3d) * p2[1]
+            if use_nn:
+                et_prob = sum(np.float32(w) * m[1] for m, w in zip(members, weights))
+            else:
+                et_prob = p3[1] if mode == "3D-only" else self.cfg.w3d * p3[1] + (1.0 - self.cfg.w3d) * p2[1]
             review_mask, review_spots = self._review_flags(labels, np.clip(et_prob, 0.0, 1.0))
 
         cleanup = None
@@ -155,6 +178,8 @@ class RStarSegmenter:
             diagnostics["review_spot_count"] = len(review_spots)
         if cleanup is not None:
             diagnostics.update(cleanup)
+        if cyst_changed is not None:
+            diagnostics["cyst_override_voxels"] = cyst_changed
         return RStarResult(labels=labels.astype(np.uint8), mode=mode, status=status, warnings=warnings, diagnostics=diagnostics,
                            review_mask=review_mask, review_spots=review_spots)
 

@@ -6,7 +6,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]          # .../06_rstar_inference
 REPO_ROOT = PACKAGE_ROOT.parent                             # repository root (holds sections 01 and 03)
@@ -33,6 +33,7 @@ class RStarConfig:
     review_min_voxels: int = 50            # spots smaller than this are neither kept nor flagged
     fragment_cleanup: bool = False         # remove tiny tumour fragments before the 500 mm^3 rule (SPEC Addendum 3)
     cleanup_min_voxels: int = 200          # chosen on held-out (PREREGISTERED_fragments_hybrid_2026-10-04); needs CV
+    nnunet: bool = False                   # add the nnU-Net member: (2D + 3D + nnU-Net)/3, or 3D + nnU-Net halves (SPEC Addendum 4)
     models_root: Path | None = None        # where the (untracked) checkpoints live; default: env RSTAR_MODELS_ROOT, else the repo root
     manifest_path: Path | None = None
 
@@ -66,6 +67,8 @@ class RStarConfig:
             raise ValueError(f"fragment_cleanup must be True or False, got {self.fragment_cleanup!r}")
         if isinstance(self.cleanup_min_voxels, bool) or not isinstance(self.cleanup_min_voxels, int) or self.cleanup_min_voxels < 0:
             raise ValueError(f"cleanup_min_voxels must be a non-negative integer, got {self.cleanup_min_voxels!r}")
+        if not isinstance(self.nnunet, bool):
+            raise ValueError(f"nnunet must be True or False, got {self.nnunet!r}")
         shape = tuple(self.expected_shape)
         if len(shape) != 3 or any(int(s) != s or s < 1 for s in shape):
             raise ValueError(f"expected_shape must be three positive integers, got {self.expected_shape!r}")
@@ -97,7 +100,8 @@ def _check_entry(entry: dict, where: str) -> None:
 
 
 def validate_manifest(manifest: dict) -> dict:
-    """The manifest lists exactly one 2D ensemble file and four 3D files, each with a relative path and a SHA-256."""
+    """The manifest lists exactly one 2D ensemble file and four 3D files, each with a relative path and a SHA-256,
+    plus an optional 'nnunet' entry (the checkpoint_final.pth of an nnU-Net model folder, SPEC Addendum 4)."""
     if "ensemble_2d" not in manifest or "family_3d" not in manifest:
         raise ValueError("manifest needs 'ensemble_2d' and 'family_3d'")
     _check_entry(manifest["ensemble_2d"], "ensemble_2d")
@@ -105,7 +109,28 @@ def validate_manifest(manifest: dict) -> dict:
         raise ValueError(f"manifest must list exactly 4 3D members, found {len(manifest['family_3d'])}")
     for i, entry in enumerate(manifest["family_3d"]):
         _check_entry(entry, f"family_3d[{i}]")
+    if "nnunet" in manifest:
+        _check_nnunet_entry(manifest["nnunet"])
     return manifest
+
+
+def _check_nnunet_entry(entry: dict) -> None:
+    """Either {name, path, sha256} or {name, checkpoints: [{path, sha256}, ...]} (several folds, SPEC Addendum 4c)."""
+    if "checkpoints" not in entry:
+        _check_entry(entry, "nnunet")
+        return
+    if "path" in entry or "sha256" in entry:
+        raise ValueError("manifest entry nnunet: give either 'path'/'sha256' or 'checkpoints', not both")
+    if "name" not in entry:
+        raise ValueError("manifest entry nnunet is missing 'name'")
+    checkpoints = entry["checkpoints"]
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise ValueError("manifest entry nnunet: 'checkpoints' must be a non-empty list of {path, sha256}")
+    for i, item in enumerate(checkpoints):
+        _check_entry(dict(item, name=entry["name"]), f"nnunet.checkpoints[{i}]")
+    folders = {str(PurePosixPath(str(item["path"]).replace("\\", "/")).parent.parent) for item in checkpoints}
+    if len(folders) != 1:
+        raise ValueError(f"manifest entry nnunet: all checkpoints must be in one model folder, found {sorted(folders)}")
 
 
 def load_manifest(path: str | Path | None = None) -> dict:
