@@ -38,6 +38,20 @@ def fuse_weighted(probs_list, weights, background_scale: float) -> np.ndarray:
     return argmax_labels(acc)
 
 
+def cyst_override(labels: np.ndarray, nnunet_probs: np.ndarray):
+    """SPEC Addendum 4b: every voxel where nnU-Net's own argmax is cyst (label 3) becomes 3.
+    Returns (new labels, voxels changed). The input is never modified."""
+    labels = np.asarray(labels)
+    nnunet_probs = np.asarray(nnunet_probs)
+    if nnunet_probs.shape[1:] != labels.shape:
+        raise ValueError(f"nnU-Net probabilities {nnunet_probs.shape} do not match the labels {labels.shape}")
+    out = np.array(labels, copy=True)
+    cyst = np.argmax(nnunet_probs, axis=0) == 3
+    changed = int((cyst & (out != 3)).sum())
+    out[cyst] = 3
+    return out, changed
+
+
 def apply_small_et_rule(labels: np.ndarray, min_mm3: float, voxel_mm3: float):
     """Relabel enhancing tumour (1) as non-enhancing (2) when 0 < total ET volume < min_mm3.
     Returns (new labels, ET voxels before the rule, relabelled?). The input is never modified."""

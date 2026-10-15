@@ -146,6 +146,9 @@ class RStarSegmenter:
             labels = fusion.fuse_weighted(members, weights, self.cfg.background_scale)
         else:
             labels = fusion.argmax_labels(p3)               # measured 3D-only path: plain argmax, no background scaling
+        cyst_changed = None
+        if use_nn:                                          # SPEC Addendum 4b: nnU-Net decides cysts
+            labels, cyst_changed = fusion.cyst_override(labels, pn)
 
         review_mask = review_spots = None
         if self.cfg.review_flags:                           # from the labels BEFORE the 500 mm^3 rule (it may erase them)
@@ -175,6 +178,8 @@ class RStarSegmenter:
             diagnostics["review_spot_count"] = len(review_spots)
         if cleanup is not None:
             diagnostics.update(cleanup)
+        if cyst_changed is not None:
+            diagnostics["cyst_override_voxels"] = cyst_changed
         return RStarResult(labels=labels.astype(np.uint8), mode=mode, status=status, warnings=warnings, diagnostics=diagnostics,
                            review_mask=review_mask, review_spots=review_spots)
 

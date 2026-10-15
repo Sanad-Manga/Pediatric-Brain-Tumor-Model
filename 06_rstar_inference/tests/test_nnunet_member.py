@@ -10,7 +10,7 @@ from _helpers import TINY, make_volume, tiny_config
 from rstar import RStarConfig, RStarSegmenter
 from rstar.cli import main
 from rstar.config import load_manifest, validate_manifest
-from rstar.fusion import apply_small_et_rule, fuse, fuse_weighted, remove_fragments
+from rstar.fusion import apply_small_et_rule, cyst_override, fuse, fuse_weighted, remove_fragments
 from rstar.guards import IdentityStub
 from rstar.models import ModelIntegrityError
 from rstar.nnunet_member import load_nnunet, nnunet_probs
@@ -331,4 +331,65 @@ def test_three_fresh_patients_reproduce_the_fusion_scores():
         lab = result.labels.astype(np.int64)
         assert result.mode == "R*+nnU-Net"
         got = (_dice(lab == 1, truth == 1) + _dice(np.isin(lab, (1, 2, 3)), np.isin(truth, (1, 2, 3))) + _dice(lab > 0, truth > 0)) / 3
-        assert got == pytest.approx((ref["et"] + ref["nc"] + ref["wt"]) / 3, abs=0.005), sid
+        assert got == pytest.approx(ref["mean"], abs=0.005), sid       # F + cyst override (Req 55)
+
+
+# ------------------------------------------------------------------------------------------------ Req 53
+def test_cyst_override_exact_on_a_hand_built_volume():
+    lab = np.zeros((6, 7, 8), np.int16)
+    lab[1:4, 1:4, 1:4] = 4
+    lab[2, 2, 2] = 1
+    lab[5, 6, 7] = 3                                    # already cyst: stays 3, not counted
+    pn = np.zeros((5, 6, 7, 8), np.float32)
+    pn[0] = 1.0
+    cyst = np.zeros((6, 7, 8), bool)
+    cyst[2:5, 2:4, 2:6] = True                          # covers tumour, ET, background
+    cyst[5, 6, 7] = True
+    pn[3][cyst] = 2.0
+    before = lab.copy()
+    out, changed = cyst_override(lab, pn)
+    assert np.array_equal(lab, before) and out.dtype == lab.dtype
+    assert (out[cyst] == 3).all() and np.array_equal(out[~cyst], lab[~cyst])
+    assert changed == int((cyst & (lab != 3)).sum()) == int((out != lab).sum())
+    with pytest.raises(ValueError):
+        cyst_override(lab, pn[:, :5])
+
+
+# ------------------------------------------------------------------------------------------------ Req 54
+def _with_cyst(p, region, prob=0.9):
+    p = p.copy()
+    p[(slice(None), *region)] = 0.0
+    p[(3, *region)] = prob
+    p[(0, *region)] = 1.0 - prob
+    return p
+
+
+CYST = (slice(12, 16), slice(28, 32), slice(20, 24))     # 64 voxels inside BLOB, outside ET
+
+
+@pytest.mark.parametrize("present", [(True, True, True, True), (True, True, False, True)])
+def test_pipeline_applies_the_cyst_override_after_fusion(present):
+    vol, _ = make_volume()
+    p2, p3, pn = _probs(0.9), _probs(0.8), _with_cyst(_probs(0.7), CYST, prob=0.6)
+    result = _seg(p2, p3, pn, nnunet=True).segment(vol, present)
+    members, w = ([p2, p3, pn], [1 / 3] * 3) if all(present) else ([p3, pn], [0.5, 0.5])
+    fused = fuse_weighted(members, w, 0.5)
+    assert not (fused[CYST] == 3).all()                 # the fusion alone would not call the cyst
+    over, n = cyst_override(fused, pn)
+    assert np.array_equal(result.labels, apply_small_et_rule(over, 500.0, 1.0)[0])
+    assert (result.labels[CYST] == 3).all() and result.diagnostics["cyst_override_voxels"] == n == 64
+
+
+def test_flags_and_cleanup_see_the_overridden_labels():
+    vol, _ = make_volume()
+    cyst_in_et = (slice(14, 18), slice(16, 20), slice(12, 16))   # 64 voxels inside the ET block
+    pn = _with_cyst(_probs(0.6), cyst_in_et)
+    result = _seg(_probs(0.5), _probs(0.6), pn, nnunet=True, review_flags=True, review_prob_cut=0.99).segment(vol)
+    assert result.review_spots[0]["voxels"] == 800 - 64           # the cyst voxels are no longer part of the ET spot
+    assert (result.review_mask[cyst_in_et] == 0).all()
+
+
+def test_no_cyst_override_key_when_off():
+    vol, _ = make_volume()
+    result = _seg(pn=_with_cyst(_probs(), CYST)).segment(vol)
+    assert "cyst_override_voxels" not in result.diagnostics and not (result.labels[CYST] == 3).any()
