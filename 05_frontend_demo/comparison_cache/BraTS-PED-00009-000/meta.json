@@ -92,19 +92,19 @@
     },
     "rstar_nn": {
       "ET": {
-        "dice": 0.927,
-        "precision": 0.9314,
-        "recall": 0.9227
+        "dice": 0.9266,
+        "precision": 0.932,
+        "recall": 0.9213
       },
       "NC": {
-        "dice": 0.8581,
+        "dice": 0.8583,
         "precision": 0.9367,
-        "recall": 0.7917
+        "recall": 0.7921
       },
       "WT": {
-        "dice": 0.9229,
+        "dice": 0.9231,
         "precision": 0.9592,
-        "recall": 0.8893
+        "recall": 0.8896
       }
     }
   },
@@ -115,7 +115,7 @@
     "tumour_voxels_removed": 0,
     "enhancing_voxels_relabelled": 16
   },
-  "rstar_nn_note": "Candidate, not yet the deployed model: R* with a third model, nnU-Net, averaged in equally. In pre-registered tests it scored 0.844 vs R* 0.805 on 30 untouched patients, beat our 3D models by +0.087 in 5-fold cross-validation on 226 patients, and stayed at least as good as R* under misaligned sequences, scanner differences and missing sequences. US data only; flagged spots belong to the deployed R*.",
+  "rstar_nn_note": "Candidate, not yet the deployed model: R* with a third model, nnU-Net, averaged in equally, and nnU-Net deciding cysts. In pre-registered tests it scored 0.844 vs R* 0.805 on 30 untouched patients, beat our 3D models by +0.087 in 5-fold cross-validation on 226 patients, stayed at least as good as R* under misaligned sequences, scanner differences and missing sequences, and found cysts better (cyst Dice 0.24 -> 0.33 on held-out). US data only; flagged spots belong to the deployed R*.",
   "rstar_nn_mode": "R*+nnU-Net",
   "rstar_nn_status": "ok"
 }

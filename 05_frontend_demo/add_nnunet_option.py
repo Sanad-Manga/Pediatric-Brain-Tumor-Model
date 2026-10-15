@@ -1,7 +1,7 @@
 r"""Add a CANDIDATE option, "R* + nnU-Net", to the comparison package. Nothing existing is changed.
 
-R* + nnU-Net = (2D + 3D + nnU-Net) / 3, background x0.5, argmax, 500 mm^3 rule (06_rstar_inference SPEC Addendum 4,
-`RStarConfig(nnunet=True)`). Pre-registered results (US BraTS-PEDs only): 30 untouched patients 0.844 vs R* 0.805;
+R* + nnU-Net = (2D + 3D + nnU-Net) / 3, background x0.5, argmax, nnU-Net's cyst voxels set to cyst, 500 mm^3 rule
+(06_rstar_inference SPEC Addenda 4 and 4b, `RStarConfig(nnunet=True)`). Pre-registered results (US BraTS-PEDs only): 30 untouched patients 0.844 vs R* 0.805;
 5-fold cross-validation on 226 patients: nnU-Net +0.087 over the 3D family; at least as robust as R* under
 misalignment, scanner differences and missing sequences. None of the demo patients was used to train nnU-Net (checked).
 
@@ -26,10 +26,11 @@ from rstar import RStarConfig, RStarSegmenter  # noqa: E402
 
 MODELS_ROOT = Path(os.environ.get("RSTAR_MODELS_ROOT", r"C:\Users\ahmed\Pediatric-Brain-Tumor-Model"))
 TRAIN_MANIFEST = HERE.parent / "00_shared" / "manifests" / "hospitalA_plus_B.json"
-NOTE = ("Candidate, not yet the deployed model: R* with a third model, nnU-Net, averaged in equally. In pre-registered "
-        "tests it scored 0.844 vs R* 0.805 on 30 untouched patients, beat our 3D models by +0.087 in 5-fold "
-        "cross-validation on 226 patients, and stayed at least as good as R* under misaligned sequences, scanner "
-        "differences and missing sequences. US data only; flagged spots belong to the deployed R*.")
+NOTE = ("Candidate, not yet the deployed model: R* with a third model, nnU-Net, averaged in equally, and nnU-Net deciding "
+        "cysts. In pre-registered tests it scored 0.844 vs R* 0.805 on 30 untouched patients, beat our 3D models by "
+        "+0.087 in 5-fold cross-validation on 226 patients, stayed at least as good as R* under misaligned sequences, "
+        "scanner differences and missing sequences, and found cysts better (cyst Dice 0.24 -> 0.33 on held-out). "
+        "US data only; flagged spots belong to the deployed R*.")
 
 
 def main():
