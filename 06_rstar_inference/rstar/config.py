@@ -6,7 +6,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]          # .../06_rstar_inference
 REPO_ROOT = PACKAGE_ROOT.parent                             # repository root (holds sections 01 and 03)
@@ -110,8 +110,27 @@ def validate_manifest(manifest: dict) -> dict:
     for i, entry in enumerate(manifest["family_3d"]):
         _check_entry(entry, f"family_3d[{i}]")
     if "nnunet" in manifest:
-        _check_entry(manifest["nnunet"], "nnunet")
+        _check_nnunet_entry(manifest["nnunet"])
     return manifest
+
+
+def _check_nnunet_entry(entry: dict) -> None:
+    """Either {name, path, sha256} or {name, checkpoints: [{path, sha256}, ...]} (several folds, SPEC Addendum 4c)."""
+    if "checkpoints" not in entry:
+        _check_entry(entry, "nnunet")
+        return
+    if "path" in entry or "sha256" in entry:
+        raise ValueError("manifest entry nnunet: give either 'path'/'sha256' or 'checkpoints', not both")
+    if "name" not in entry:
+        raise ValueError("manifest entry nnunet is missing 'name'")
+    checkpoints = entry["checkpoints"]
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise ValueError("manifest entry nnunet: 'checkpoints' must be a non-empty list of {path, sha256}")
+    for i, item in enumerate(checkpoints):
+        _check_entry(dict(item, name=entry["name"]), f"nnunet.checkpoints[{i}]")
+    folders = {str(PurePosixPath(str(item["path"]).replace("\\", "/")).parent.parent) for item in checkpoints}
+    if len(folders) != 1:
+        raise ValueError(f"manifest entry nnunet: all checkpoints must be in one model folder, found {sorted(folders)}")
 
 
 def load_manifest(path: str | Path | None = None) -> dict:

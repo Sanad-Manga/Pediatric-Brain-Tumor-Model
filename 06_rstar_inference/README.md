@@ -103,7 +103,15 @@ scores better on the BraTS lesion-wise metric than R* with cleanup (fresh-30 0.8
 it deleted one real 118-voxel enhancing lesion on fresh-30 (held-out: false spots 19 -> 2). Keep it off with nnU-Net. Flags
 never change the labels (0.3-0.5 flagged spots per patient) and remain an option.
 
-The nnU-Net option is off by default; switching the default is a separate decision.
+**Which nnU-Net.** Two manifests ship. `config/models.default.json` uses the 1,000-epoch model trained on the 145 training
+patients (tested on held-out and fresh-30). `config/models.nnunet226.json` uses the 5-fold ensemble trained on all 226
+labelled non-fresh patients (250 epochs per fold): on fresh-30 the fusion scores 0.852 with it vs 0.844 with the 145-patient
+model (+0.007, CI +0.003 to +0.013; `PREREGISTERED_ens5_2026-10-15`). It saw the held-out patients in training, so fresh-30 is
+its only test. Use it with `RStarConfig(manifest_path=".../config/models.nnunet226.json", nnunet=True)`; its five fold files
+go in `01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_k/` with the model's `plans.json` and
+`dataset.json`, each pinned by SHA-256. nnU-Net averages the folds itself.
+
+The nnU-Net option is off by default; switching the default, and which nnU-Net to ship, are separate decisions.
 
 Needs `nnunetv2` (`pip install nnunetv2==2.8.1`, imported only when the option is on) and the model folder
 `01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/` (`plans.json`, `dataset.json`,

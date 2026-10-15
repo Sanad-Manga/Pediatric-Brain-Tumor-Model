@@ -23,7 +23,9 @@ def load_nnunet(cfg: RStarConfig):
     if "nnunet" not in manifest:
         raise ValueError("nnunet=True but the models manifest has no 'nnunet' entry")
     entry = manifest["nnunet"]
-    ckpt_path = _resolve(entry, cfg)  # SHA-256 check (unless verify_hashes=False) before torch.load below
+    items = ([dict(c, name=f"{entry['name']}[{Path(c['path']).parent.name}]") for c in entry["checkpoints"]]
+             if "checkpoints" in entry else [entry])                  # several folds (SPEC Addendum 4c) or one
+    ckpt_paths = [_resolve(item, cfg) for item in items]  # every SHA-256 checked (unless verify_hashes=False) before any load
     try:
         import torch
         from batchgenerators.utilities.file_and_folder_operations import load_json
@@ -34,10 +36,11 @@ def load_nnunet(cfg: RStarConfig):
     except ImportError as exc:
         raise ImportError("nnunet=True needs the nnunetv2 package: pip install nnunetv2==2.8.1") from exc
 
-    model_dir = Path(ckpt_path).parent.parent
+    model_dir = Path(ckpt_paths[0]).parent.parent
     dataset_json = load_json(str(model_dir / "dataset.json"))
     plans_manager = PlansManager(load_json(str(model_dir / "plans.json")))
-    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    checkpoints = [torch.load(p, map_location="cpu", weights_only=False) for p in ckpt_paths]
+    checkpoint = checkpoints[0]
     configuration_manager = plans_manager.get_configuration(checkpoint["init_args"]["configuration"])
     network = nnUNetTrainer.build_network_architecture(
         plans_manager, configuration_manager,
@@ -48,10 +51,10 @@ def load_nnunet(cfg: RStarConfig):
     predictor = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=True, device=device,
                                 perform_everything_on_device=device.type == "cuda", verbose=False,
                                 verbose_preprocessing=False, allow_tqdm=False)
-    predictor.manual_initialization(network, plans_manager, configuration_manager, [checkpoint["network_weights"]],
+    predictor.manual_initialization(network, plans_manager, configuration_manager, [c["network_weights"] for c in checkpoints],
                                     dataset_json, checkpoint["trainer_name"],
                                     checkpoint.get("inference_allowed_mirroring_axes"))
-    return predictor, [dict(entry, resolved_path=str(ckpt_path))]
+    return predictor, [dict(item, resolved_path=str(p)) for item, p in zip(items, ckpt_paths)]
 
 
 def nnunet_probs(predictor, volume: np.ndarray, present) -> np.ndarray:

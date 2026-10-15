@@ -1,0 +1,14 @@
+{
+  "_comment": "Per-patient mean legacy Dice (ET, TC, WT; rule applied) of (2D + 3D + nnU-Net 5-fold 226-patient ensemble)/3, background x0.5, cyst override, 500 mm3 rule, from saved maps (nnUNetv2_predict -f 0 1 2 3 4; PREREGISTERED_ens5_2026-10-15). Built by neuropeds_overnight/cv/ref_nnunet226.py.",
+  "patients": {
+    "BraTS-PED-00077-000": {
+      "mean": 0.9459524237521721
+    },
+    "BraTS-PED-00103-000": {
+      "mean": 0.7971935504376036
+    },
+    "BraTS-PED-00136-000": {
+      "mean": 0.6958511606263138
+    }
+  }
+}

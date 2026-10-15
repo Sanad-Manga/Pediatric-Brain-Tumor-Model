@@ -393,3 +393,131 @@ def test_no_cyst_override_key_when_off():
     vol, _ = make_volume()
     result = _seg(pn=_with_cyst(_probs(), CYST)).segment(vol)
     assert "cyst_override_voxels" not in result.diagnostics and not (result.labels[CYST] == 3).any()
+
+
+# ------------------------------------------------------------------------------------------------ Req 56 (Addendum 4c)
+def _multi(paths, shas=None):
+    return {"name": "n5", "checkpoints": [{"path": p, "sha256": s} for p, s in zip(paths, shas or ["a" * 64] * len(paths))]}
+
+
+def test_multi_fold_entry_is_validated():
+    base = {k: v for k, v in load_manifest().items() if k != "nnunet"}
+    ok = _multi([f"m/fold_{k}/checkpoint_final.pth" for k in range(5)])
+    assert validate_manifest(dict(base, nnunet=ok))["nnunet"] == ok
+    bad = [
+        {"name": "n5", "checkpoints": []},
+        dict(_multi(["m/fold_0/c.pth"]), path="m/fold_0/c.pth", sha256="a" * 64),
+        {"checkpoints": [{"path": "m/fold_0/c.pth", "sha256": "a" * 64}]},
+        _multi(["m/fold_0/c.pth", "C:/abs/fold_1/c.pth"]),
+        _multi(["m/fold_0/c.pth"], ["xyz"]),
+        _multi(["m/fold_0/c.pth", "other/fold_1/c.pth"]),
+    ]
+    for entry in bad:
+        with pytest.raises(ValueError, match="nnunet"):
+            validate_manifest(dict(base, nnunet=entry))
+
+
+def test_the_226_patient_manifest_lists_five_folds_of_one_model():
+    m = load_manifest(Path(__file__).parents[1] / "config" / "models.nnunet226.json")
+    paths = [c["path"] for c in m["nnunet"]["checkpoints"]]
+    assert len(paths) == 5 and all(p.endswith(f"fold_{k}/checkpoint_final.pth") for k, p in enumerate(paths))
+    assert m["ensemble_2d"] == load_manifest()["ensemble_2d"] and m["family_3d"] == load_manifest()["family_3d"]
+
+
+# ------------------------------------------------------------------------------------------------ Req 57
+def _fold_files(tmp_path, n=3):
+    import hashlib
+
+    entries = []
+    for k in range(n):
+        f = tmp_path / "model" / f"fold_{k}" / "checkpoint_final.pth"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(f"fold {k}".encode())
+        entries.append({"path": f"model/fold_{k}/checkpoint_final.pth", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()})
+    return entries
+
+
+def _manifest_with(tmp_path, entry):
+    base = {k: v for k, v in load_manifest().items() if k != "nnunet"}
+    path = tmp_path / "m.json"
+    path.write_text(json.dumps(dict(base, nnunet=entry)))
+    return path
+
+
+def test_every_fold_hash_is_checked_before_any_file_is_opened(tmp_path, monkeypatch):
+    import torch
+
+    opened = []
+    monkeypatch.setattr(torch, "load", lambda *a, **k: opened.append(a[0]))
+    entries = _fold_files(tmp_path)
+    entries[-1]["sha256"] = "0" * 64                    # the LAST fold is wrong
+    path = _manifest_with(tmp_path, {"name": "n", "checkpoints": entries})
+    with pytest.raises(ModelIntegrityError, match="fold_2"):
+        load_nnunet(RStarConfig(manifest_path=path, nnunet=True, models_root=tmp_path))
+    assert opened == []
+
+
+def test_folds_reach_nnunet_in_manifest_order_with_one_info_item_each(tmp_path, monkeypatch):
+    pytest.importorskip("nnunetv2")
+    import torch
+    import nnunetv2.inference.predict_from_raw_data as pr
+    import nnunetv2.training.nnUNetTrainer.nnUNetTrainer as tr
+    import nnunetv2.utilities.plans_handling.plans_handler as ph
+    import batchgenerators.utilities.file_and_folder_operations as fo
+    import nnunetv2.utilities.label_handling.label_handling as lh
+
+    entries = _fold_files(tmp_path)
+    path = _manifest_with(tmp_path, {"name": "n", "checkpoints": entries})
+    monkeypatch.setattr(torch, "load", lambda p, **k: {"network_weights": f"weights of {Path(p).parent.name}",
+                                                       "init_args": {"configuration": "3d_fullres"}, "trainer_name": "t"})
+    monkeypatch.setattr(fo, "load_json", lambda p: {})
+
+    class FakePlans:
+        def __init__(self, plans):
+            pass
+
+        def get_configuration(self, name):
+            return name
+
+        def get_label_manager(self, ds):
+            return type("LM", (), {"num_segmentation_heads": 5})()
+
+    monkeypatch.setattr(ph, "PlansManager", FakePlans)
+    monkeypatch.setattr(lh, "determine_num_input_channels", lambda *a: 4)
+    monkeypatch.setattr(tr.nnUNetTrainer, "build_network_architecture", staticmethod(lambda *a, **k: "net"))
+    seen = {}
+
+    class FakePredictor:
+        def __init__(self, **kwargs):
+            pass
+
+        def manual_initialization(self, network, plans, conf, params, *rest):
+            seen["params"] = params
+
+    monkeypatch.setattr(pr, "nnUNetPredictor", FakePredictor)
+    _, info = load_nnunet(RStarConfig(manifest_path=path, nnunet=True, models_root=tmp_path, device="cpu"))
+    assert seen["params"] == ["weights of fold_0", "weights of fold_1", "weights of fold_2"]
+    assert [i["sha256"] for i in info] == [e["sha256"] for e in entries] and len({i["name"] for i in info}) == 3
+
+
+# ------------------------------------------------------------------------------------------------ Req 58 (slow)
+REF226 = json.loads((Path(__file__).parent / "fixtures" / "rstar_nnunet226_reference_scores.json").read_text(encoding="utf-8"))["patients"]
+
+
+@needs_data
+def test_the_226_patient_ensemble_reproduces_its_reference():
+    import nibabel as nib
+
+    manifest = Path(__file__).parents[1] / "config" / "models.nnunet226.json"
+    folds = [Path(MODELS_ROOT) / c["path"] for c in load_manifest(manifest)["nnunet"]["checkpoints"]]
+    if not all(f.is_file() for f in folds):
+        pytest.skip("the 226-patient fold checkpoints are not under RSTAR_MODELS_ROOT")
+    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), manifest_path=manifest, nnunet=True))
+    assert len([c for c in seg._checkpoints if "nnunet" in c["name"]]) == 5
+    for sid, ref in REF226.items():
+        base = Path(TEST_DATA) / sid
+        result, _ = seg.segment_paths({n: base / f"{sid}-{n}.nii.gz" for n in ("t1c", "t1n", "t2f", "t2w")})
+        truth = np.rint(np.asarray(nib.load(str(base / f"{sid}-seg.nii.gz")).dataobj, dtype=np.float32)).astype(np.int64)
+        lab = result.labels.astype(np.int64)
+        got = (_dice(lab == 1, truth == 1) + _dice(np.isin(lab, (1, 2, 3)), np.isin(truth, (1, 2, 3))) + _dice(lab > 0, truth > 0)) / 3
+        assert got == pytest.approx(ref["mean"], abs=0.005), sid
