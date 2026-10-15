@@ -274,6 +274,6 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [x] Req 50: CLI --nnunet; report mode
 - [x] Req 51: real-data F scores reproduced within 0.005 (slow); nnU-Net hash matches
 - [x] Req 52: README documents the option, results, modes, caveats, install; pre-existing tests pass unedited
-- [ ] Req 53: cyst_override exact on hand-built volumes, no mutation, dtype, count, shape check
-- [ ] Req 54: pipeline applies the override after fusion in both nnU-Net modes; diagnostics count; nothing changes when off
-- [ ] Req 55: real-data reference = F+C within 0.005; README documents the override and the flags/cleanup result
+- [x] Req 53: cyst_override exact on hand-built volumes, no mutation, dtype, count, shape check
+- [x] Req 54: pipeline applies the override after fusion in both nnU-Net modes; diagnostics count; nothing changes when off
+- [x] Req 55: real-data reference = F+C within 0.005; README documents the override and the flags/cleanup result
