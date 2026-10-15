@@ -1,23 +1,26 @@
 {
-  "_comment": "Arm F per-patient Dice from the 2026-10-11 pre-registered nnU-Net test (PREREGISTERED_nnunet_2026-10-11, scores_nnunet.json): (2D + 3D + nnU-Net)/3, background x0.5, ET rule 500 mm3. Values are [ET, TC, WT]; nnU-Net probabilities came from nnUNetv2_predict (file path).",
+  "_comment": "Per-patient mean legacy Dice (ET, TC, WT; rule applied) of the nnU-Net recipe: F = (2D + 3D + nnU-Net)/3, background x0.5, then the cyst override (SPEC Addendum 4b), then the 500 mm3 rule = arm FC of PREREGISTERED_cyst_override_2026-10-15 (nnunet/cyst_override.json). et/nc/wt are arm F of PREREGISTERED_nnunet_2026-10-11 (before the cyst override), kept for reference.",
   "patients": {
     "BraTS-PED-00077-000": {
       "et": 1.0,
       "nc": 0.9226078378620751,
       "wt": 0.9226078378620751,
-      "true_et_voxels": 0
+      "true_et_voxels": 0,
+      "mean": 0.9484052252413834
     },
     "BraTS-PED-00103-000": {
       "et": 0.6942038640906063,
       "nc": 0.8457637096409002,
       "wt": 0.8457637096409002,
-      "true_et_voxels": 1213
+      "true_et_voxels": 1213,
+      "mean": 0.7952437611241355
     },
     "BraTS-PED-00136-000": {
       "et": 0.8412230458221024,
       "nc": 0.5206801841828904,
       "wt": 0.5748607180098316,
-      "true_et_voxels": 12928
+      "true_et_voxels": 12928,
+      "mean": 0.651390957870944
     }
   }
 }

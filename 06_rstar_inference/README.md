@@ -79,8 +79,8 @@ trained on the same 145 patients as the 3D family). Modes become:
 
 | Sequences | Mode | Recipe |
 |---|---|---|
-| all four | `'R*+nnU-Net'` | (2D + 3D + nnU-Net) / 3, background x0.5, argmax, 500 mm³ rule |
-| one or more absent | `'3D+nnU-Net'` | (3D + nnU-Net) / 2, background x0.5, argmax, 500 mm³ rule (2D not run) |
+| all four | `'R*+nnU-Net'` | (2D + 3D + nnU-Net) / 3, background x0.5, argmax, cyst override, 500 mm³ rule |
+| one or more absent | `'3D+nnU-Net'` | (3D + nnU-Net) / 2, background x0.5, argmax, cyst override, 500 mm³ rule (2D not run) |
 
 Statuses, warnings, the 2D-vs-3D agreement guard, review flags and fragment cleanup work as in R*. Evidence (all
 pre-registered, US BraTS-PEDs only):
@@ -93,8 +93,17 @@ pre-registered, US BraTS-PEDs only):
   R* under 1-3 mm sequence misalignment, seven simulated scanner differences, and each missing sequence (where
   3D + nnU-Net beats R*'s 3D-only fallback for all four sequences).
 
-Caveats: the review-flag threshold (0.7) and the cleanup size (200) were chosen for R* and are not validated with the
-nnU-Net fusion. The option is off by default; switching the default is a separate decision.
+**Cyst override.** Right after the fusion, every voxel nnU-Net itself calls cyst becomes cyst (the 2D and 3D models almost
+never predict cyst, so averaging diluted nnU-Net's cysts). Pre-registered (`PREREGISTERED_cyst_override_2026-10-15`): held-out
+cyst Dice 0.242 -> 0.331 (CI +0.037 to +0.152), confirmed on 145 independent cross-validation patients (+0.016, CI +0.008
+to +0.027); the usual ET/TC/WT Dice is unchanged. `diagnostics['cyst_override_voxels']` reports how many voxels it changed.
+
+**Review flags and fragment cleanup with nnU-Net** (`PREREGISTERED_nn_flags_cleanup_2026-10-15`): the fusion alone already
+scores better on the BraTS lesion-wise metric than R* with cleanup (fresh-30 0.806 vs 0.768). Cleanup did **not** carry over:
+it deleted one real 118-voxel enhancing lesion on fresh-30 (held-out: false spots 19 -> 2). Keep it off with nnU-Net. Flags
+never change the labels (0.3-0.5 flagged spots per patient) and remain an option.
+
+The nnU-Net option is off by default; switching the default is a separate decision.
 
 Needs `nnunetv2` (`pip install nnunetv2==2.8.1`, imported only when the option is on) and the model folder
 `01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/` (`plans.json`, `dataset.json`,
