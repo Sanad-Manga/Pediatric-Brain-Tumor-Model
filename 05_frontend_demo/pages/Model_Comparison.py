@@ -136,6 +136,13 @@ def load_clean_labels(patient_id):
     return np.load(path)["labels"] if path.exists() else None
 
 
+@st.cache_data
+def load_nn_labels(patient_id):
+    """comparison_cache/<patient>/labels_rstar_nn.npz (add_nnunet_option.py), or None."""
+    path = COMPARISON_CACHE / patient_id / "labels_rstar_nn.npz"
+    return np.load(path)["labels"] if path.exists() else None
+
+
 def create_plotly_viewer(bg_img, mask_img, show_mask, review_img=None, show_review=False, changed_img=None,
                          height=320):
     fig = go.Figure()
@@ -248,7 +255,9 @@ def main():
         has_hires = lbl_rstar_hires is not None
         lbl_rstar_clean = load_clean_labels(selected_patient)
         has_clean = lbl_rstar_clean is not None
-        has_variants = has_hires or has_clean
+        lbl_rstar_nn = load_nn_labels(selected_patient)
+        has_nn = lbl_rstar_nn is not None
+        has_variants = has_hires or has_clean or has_nn
         
         demo_axial_dir = DEMO_CACHE / selected_patient / "axial"
         avail_bg_slices = []
@@ -309,15 +318,18 @@ def main():
                 show_review = st.toggle("🟣 Flagged Spots", value=True)
             idx += 1
             
-        versions = ["R* (deployed)"] + (["R* + fragment cleanup"] if has_clean else []) + (["R* hi-res"] if has_hires else [])
+        versions = (["R* (deployed)"] + (["R* + nnU-Net (candidate)"] if has_nn else [])
+                    + (["R* + fragment cleanup"] if has_clean else []) + (["R* hi-res"] if has_hires else []))
         version = versions[0]
         if has_variants:
             with cols[idx]:
                 version = st.radio("R* version", versions, index=0, key="rstar_version",
-                                   help="The two extra versions are research options measured on 111 patients, "
-                                        "not the deployed model; see the note under the accuracy numbers.")
+                                   help="The extra versions are not the deployed model: R* + nnU-Net is the candidate "
+                                        "that passed every pre-registered test; the others are research options. "
+                                        "See the note under the accuracy numbers.")
         use_hires = version == "R* hi-res"
         use_clean = version == "R* + fragment cleanup"
+        use_nn = version == "R* + nnU-Net (candidate)"
                 
         bg_img = get_background_slice(selected_patient, slice_idx)
             
@@ -328,8 +340,9 @@ def main():
         rev_slice = review_mask[:, :, slice_idx] if review_mask is not None else None
         
         # Decide which R* label mask to display
-        active_rstar_lbl = lbl_rstar_hires if use_hires else lbl_rstar_clean if use_clean else lbl_rstar
-        rstar_title = "R* hi-res" if use_hires else "R* clean" if use_clean else "R*"
+        active_rstar_lbl = (lbl_rstar_hires if use_hires else lbl_rstar_clean if use_clean
+                            else lbl_rstar_nn if use_nn else lbl_rstar)
+        rstar_title = "R* hi-res" if use_hires else "R* clean" if use_clean else "R* + nnU-Net" if use_nn else "R*"
         changed = (lbl_rstar != lbl_rstar_clean) if use_clean else None
         
         expert_args = None
@@ -339,9 +352,9 @@ def main():
         panels = [
             (img_col1, "2D model", "#0F172A", "viewer_2d", (bg_img, lbl_2d[:, :, slice_idx], show_mask, None, False)),
             (img_col2, "3D family", "#0F172A", "viewer_3d", (bg_img, lbl_3d[:, :, slice_idx], show_mask, None, False)),
-            # flags were computed from the deployed R*, so they are only drawn on it, not on the hi-res option
+            # flags were computed from the deployed R*, so they are not drawn on the hi-res or nnU-Net options
             (img_col3, rstar_title, "#0EA5E9", "viewer_rstar",
-             (bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice, show_review and not use_hires,
+             (bg_img, active_rstar_lbl[:, :, slice_idx], show_mask, rev_slice, show_review and not (use_hires or use_nn),
               changed[:, :, slice_idx] if use_clean else None)),
         ]
         if show_expert:
@@ -355,7 +368,7 @@ def main():
                 if st.button("🔍 Enlarge", key=f"{key}_enlarge", use_container_width=True):
                     show_enlarged(f"{title} · slice {slice_idx}", args, None if title == "Expert" else expert_args)
         with img_col3:
-            if use_hires and has_review and show_review:
+            if (use_hires or use_nn) and has_review and show_review:
                 st.caption("Flagged spots belong to the deployed R*; choose another R* version to see them.")
 
         st.caption("Colours: red = enhancing tumour (ET) · green = non-enhancing core · blue = cyst · "
@@ -440,6 +453,8 @@ def main():
             st.caption(f"🔬 **Research Option Active:** {meta['rstar_hires_note']}")
         elif use_clean and "rstar_clean_note" in meta:
             st.caption(f"🔬 **Research Option Active:** {meta['rstar_clean_note']}")
+        elif use_nn and "rstar_nn_note" in meta:
+            st.caption(f"🧪 **Candidate Model Active:** {meta['rstar_nn_note']}")
         else:
             st.caption("Dice per tumour region for the selected patient only (1 = perfect overlap with the expert). "
                        "Overall results across all test patients are on the Dashboard page.")
@@ -456,6 +471,9 @@ def main():
         elif use_clean:
             metrics_rstar = meta.get("regions", {}).get("rstar_clean", {})
             col_3_title = "<b style='color:#0EA5E9;'>R* + cleanup</b>"
+        elif use_nn:
+            metrics_rstar = meta.get("regions", {}).get("rstar_nn", {})
+            col_3_title = "<b style='color:#0EA5E9;'>R* + nnU-Net</b>"
         else:
             metrics_rstar = meta.get("regions", {}).get("rstar", {})
             col_3_title = "<b style='color:#0EA5E9;'>R* Fusion</b>"
