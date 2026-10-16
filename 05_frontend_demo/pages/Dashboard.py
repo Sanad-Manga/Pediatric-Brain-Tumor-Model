@@ -254,6 +254,8 @@ if model_metrics:
                    f"with the cleanup as well, one more small lesion is missed on the clean test "
                    f"({fs['missed_with_flags_and_cleanup']} instead of {fs['missed_with_flags']}). Lesions = expert enhancing "
                    f"lesions over 50 voxels. Rule: {flag_study['rule']}")
+        st.info("🚩 These flagged cases can be inspected slice-by-slice on the **Model Comparison** page "
+                '(see its "Flagged cases" panel).')
     st.divider()
 
 if not metrics_data:
