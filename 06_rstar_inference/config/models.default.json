@@ -1,5 +1,5 @@
 {
-  "_comment": "Checkpoints are not in git. Paths are relative to the models root (RSTAR_MODELS_ROOT, else the repo root); the SHA-256 is verified before a file is opened.",
+  "_comment": "Checkpoints are not in git. Paths are relative to the models root (RSTAR_MODELS_ROOT, else the repo root); the SHA-256 is verified before a file is opened. The default nnU-Net is the 5-fold ensemble trained on all 226 labelled non-fresh patients (SPEC Addendum 5); it saw the held-out patients in training, so fresh-30 is its only test. models.nnunet145.json holds the 145-patient alternative.",
   "ensemble_2d": {
     "name": "shipped_2d_ensemble",
     "path": "03_augmentation_eval/checkpoints/overnight_run/best.pt",
@@ -28,8 +28,28 @@
     }
   ],
   "nnunet": {
-    "name": "nnunet_Dataset501_3d_fullres_1000ep",
-    "path": "01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/fold_all/checkpoint_final.pth",
-    "sha256": "c2ee0064f90fa240db5f39f8c8dcae38a5c4ab3518bbd215aa7ef727788d5fe5"
+    "name": "nnunet_Dataset502_226pts_5fold_250ep",
+    "checkpoints": [
+      {
+        "path": "01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_0/checkpoint_final.pth",
+        "sha256": "4c74e5c4178b1b8c4d26e2d2a092506613f28052edb5dffd099e111c45e1e702"
+      },
+      {
+        "path": "01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_1/checkpoint_final.pth",
+        "sha256": "d783205acc99b6f429626afd31c0ad959dacf48f518992ed87205fac4b550de5"
+      },
+      {
+        "path": "01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_2/checkpoint_final.pth",
+        "sha256": "15980869aaa4fde6a70dcaf67e0322a23c867f78dfb5cc0f2967602fcf90c767"
+      },
+      {
+        "path": "01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_3/checkpoint_final.pth",
+        "sha256": "a1943e9eb70d515b24d228cdcc9e1784f0df8e0bda26cf90182fb36a8f4173b8"
+      },
+      {
+        "path": "01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_4/checkpoint_final.pth",
+        "sha256": "926c621a70b5e4b770968c854fb52acc1c3af4e845533a7689bf791a24e4ad95"
+      }
+    ]
   }
 }

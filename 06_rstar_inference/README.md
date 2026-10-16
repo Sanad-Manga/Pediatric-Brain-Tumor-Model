@@ -20,12 +20,15 @@ argmax and a small enhancing-tumour clean-up rule.
 
 ## Modes and statuses
 
-| Sequences present | Mode | What runs |
-|---|---|---|
-| all four | `R*` | 2D ensemble + 3D family, fused, small-ET rule |
-| one to three | `3D-only` | the 3D family only (the 2D models collapse without every sequence: 0.14 without FLAIR), plain argmax, small-ET rule |
+| Recipe | Sequences present | Mode | What runs |
+|---|---|---|---|
+| **default** (`nnunet=True`) | all four | `R*+nnU-Net` | (2D + 3D + nnU-Net) / 3, background x0.5, cyst override, small-ET rule |
+| **default** | one to three | `3D+nnU-Net` | (3D + nnU-Net) / 2 (2D not run), background x0.5, cyst override, small-ET rule |
+| plain R* (`nnunet=False`, CLI `--no-nnunet`) | all four | `R*` | 2D ensemble + 3D family, fused, small-ET rule |
+| plain R* | one to three | `3D-only` | the 3D family only (the 2D models collapse without every sequence: 0.14 without FLAIR), plain argmax, small-ET rule |
 
-With the optional nnU-Net member on, the two modes become `R*+nnU-Net` and `3D+nnU-Net` (see below).
+Since 16 Oct 2026 (SPEC Addendum 5) the default includes nnU-Net; see "nnU-Net member" below for the evidence. Plain R* is
+the recipe before that, kept byte-identical and needing no `nnunetv2`.
 
 `status` is `ok` or `review`. `review` means: two or more sequences absent (not validated), or the 2D and 3D outlines
 disagree (whole-tumour agreement below 0.70; below 0.10 the warning names a possible 2D collapse or a frame/orientation
@@ -72,10 +75,10 @@ unchanged on the 30-patient clean test and raised the official BraTS-PED lesion-
 lesion-wise metric counts every stray fragment as a false lesion. The size of 200 was chosen on the held-out patients,
 so the option stays off by default until cross-validation confirms it.
 
-## nnU-Net member (optional, off by default)
+## nnU-Net member (on by default)
 
-With `RStarConfig(nnunet=True)` (CLI: `--nnunet`), a third model joins the fusion: a 1,000-epoch nnU-Net (`3d_fullres`,
-trained on the same 145 patients as the 3D family). Modes become:
+A third model joins the fusion: nnU-Net (`3d_fullres`). By default it is the 5-fold ensemble trained on all 226 labelled
+non-fresh patients; `nnunet=False` (CLI `--no-nnunet`) gives plain R*. Modes:
 
 | Sequences | Mode | Recipe |
 |---|---|---|
@@ -103,20 +106,23 @@ scores better on the BraTS lesion-wise metric than R* with cleanup (fresh-30 0.8
 it deleted one real 118-voxel enhancing lesion on fresh-30 (held-out: false spots 19 -> 2). Keep it off with nnU-Net. Flags
 never change the labels (0.3-0.5 flagged spots per patient) and remain an option.
 
-**Which nnU-Net.** Two manifests ship. `config/models.default.json` uses the 1,000-epoch model trained on the 145 training
-patients (tested on held-out and fresh-30). `config/models.nnunet226.json` uses the 5-fold ensemble trained on all 226
-labelled non-fresh patients (250 epochs per fold): on fresh-30 the fusion scores 0.852 with it vs 0.844 with the 145-patient
-model (+0.007, CI +0.003 to +0.013; `PREREGISTERED_ens5_2026-10-15`). It saw the held-out patients in training, so fresh-30 is
-its only test. Use it with `RStarConfig(manifest_path=".../config/models.nnunet226.json", nnunet=True)`; its five fold files
-go in `01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_k/` with the model's `plans.json` and
-`dataset.json`, each pinned by SHA-256. nnU-Net averages the folds itself.
+**Which nnU-Net.** Two manifests ship.
+- `config/models.default.json` (the default): the 5-fold ensemble trained on all 226 labelled non-fresh patients (250 epochs
+  per fold). On the 30 untouched patients the fusion scores 0.852 with it vs 0.844 with the 145-patient model (+0.007, CI
+  +0.003 to +0.013; `PREREGISTERED_ens5_2026-10-15`). **It saw the held-out patients in training, so fresh-30 is its only
+  test.** Its five fold files go in `01_model_federated/checkpoints/nnunet_Dataset502_226pts_5fold/fold_k/` with the model's
+  `plans.json` and `dataset.json`; nnU-Net averages the folds itself.
+- `config/models.nnunet145.json`: the 1,000-epoch model trained on the 145 training patients, the only nnU-Net that can be
+  tested on the held-out patients (folder `01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/`). Use it with
+  `RStarConfig(manifest_path=".../config/models.nnunet145.json")`; the demo app uses this model for that reason.
+Every checkpoint is pinned by SHA-256 like the others.
 
-The nnU-Net option is off by default; switching the default, and which nnU-Net to ship, are separate decisions.
+What did not help (pre-registered): training on 91 extra scans outlined by the model itself (`PREREGISTERED_pseudo_fold0`,
+a tie, worse enhancing tumour on fresh-30); dropping the 2D member (`PREREGISTERED_drop2d`, a tie on clean scans but 0.026
+worse at 2 mm sequence misalignment and higher contrast).
 
-Needs `nnunetv2` (`pip install nnunetv2==2.8.1`, imported only when the option is on) and the model folder
-`01_model_federated/checkpoints/nnunet_Dataset501_3d_fullres/` (`plans.json`, `dataset.json`,
-`fold_all/checkpoint_final.pth`) under the models root; the checkpoint is pinned by SHA-256 like the others. The network is
-rebuilt with nnU-Net's standard trainer class, so the training-time trainer variant is not needed.
+Needs `nnunetv2` (`pip install nnunetv2==2.8.1`; imported only when nnU-Net is used). The network is rebuilt with nnU-Net's
+standard trainer class, so the training-time trainer variant is not needed.
 
 ## Checkpoints
 
