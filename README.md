@@ -11,21 +11,68 @@ pinned: false
 
 # NeuroPeds AI — Pediatric Brain Tumor Segmentation
 
-A 2D U-Net segmentation system for pediatric brain tumors, trained on the BraTS-PEDs 2024 dataset. Built as part of a medical AI workshop.
+Segmentation of pediatric brain tumours on MRI (BraTS-PEDs 2024 data), combining a 2D U-Net ensemble, a 3D U-Net family and
+nnU-Net. Built as part of a medical AI workshop.
 
 > **Research code, not a medical device. Validated on US BraTS-PEDs only; every outline needs radiologist review.**
-> The live demo runs the 2D ensemble alone. A better-scoring recipe that adds a 3D model family (**R\***, 0.805 vs 0.711 on 30 patients never used to choose anything) is available as a standalone module in [`06_rstar_inference/`](06_rstar_inference/README.md) and is **not** wired into the demo. See [Update 2026-09-26](#update-2026-09-26-fresh-test-set-and-the-r-recipe).
 
 **Live demo:** https://neuropeds-ai.streamlit.app
 
-## What it does
+## Current state (16 October 2026)
+
+**Default recipe: R\* + nnU-Net**, in [`06_rstar_inference/`](06_rstar_inference/README.md). It averages three models' probabilities
+(the shipped 2D ensemble, the 3D family, and nnU-Net), halves the background probability, lets nnU-Net decide cysts, then
+relabels a very small enhancing tumour (under 500 mm³) as non-enhancing. When a sequence is missing, the 2D models are skipped
+(they collapse without every sequence) and 3D + nnU-Net are averaged instead. The default nnU-Net is a 5-fold ensemble trained on
+all 226 usable labelled non-fresh patients; plain R\* (2D + 3D, the September recipe) is still available with `nnunet=False`.
+
+Mean Dice per patient (enhancing tumour, tumour core, whole tumour), on **fresh-30** (30 patients never used to train or choose
+anything) and on the 81 held-out patients (looked at while choosing settings, so optimistic):
+
+| Recipe | fresh-30 | held-out (81) |
+|---|---|---|
+| Shipped 2D ensemble | 0.711 | 0.755 |
+| 3D family | 0.747 | 0.777 |
+| R\* (2D + 3D) | 0.805 | 0.810 |
+| R\* + nnU-Net (nnU-Net trained on 145 patients) | 0.844 | 0.843 |
+| **R\* + nnU-Net (nnU-Net 5-fold, 226 patients) — default** | **0.852** | not testable (it trained on them) |
+
+What the evidence says (every test was pre-registered: the pass rule and predictions were written down before running; the
+documents are named in [`06_rstar_inference/README.md`](06_rstar_inference/README.md)):
+
+- **nnU-Net is the big step.** In 5-fold cross-validation over the 226 patients, nnU-Net scored 0.813 against 0.726 for the 3D
+  family (+0.087, better in all 5 folds). Added to R\*, it beats R\* on fresh-30 by +0.039 (95% CI +0.017 to +0.066).
+- **It is also more robust.** On fresh-30 with simulated problems (sequences misaligned by 1-3 mm, seven kinds of scanner
+  difference, each sequence missing), R\* + nnU-Net stays 0.03-0.08 above R\* in every case.
+- **More real data helps; model-made outlines do not.** nnU-Net trained on 226 patients beats the 145-patient model (+0.021 on
+  fresh-30). Training on 91 extra scans outlined by the model itself was a tie and made enhancing tumour worse.
+- **The 2D member still earns its place**: removing it ties on clean scans but costs 0.026 when sequences are misaligned by 2 mm.
+
+Known limits:
+
+- Small enhancing lesions (51-500 voxels) are still mostly missed (11 of 47 found on the two test sets), and nnU-Net did not fix
+  this. Cysts improved (cyst Dice 0.13 to 0.29) but remain weak. About 15 of 111 test patients still have under 80% of the
+  tumour found, mostly faint non-enhancing core.
+- The 226-patient nnU-Net can only be tested on fresh-30, which is small (n = 30) and has now decided several comparisons.
+- Only US BraTS-PEDs data exists here; nothing is measured on other scanners, countries or populations.
+
+The nnU-Net models are trained with `nnunetv2` 2.8.1 (`3d_fullres`, default trainer) outside this repository; their checkpoints
+are not in git (see the module README for where they go and how they are hash-pinned).
+
+**Demo:** the Model Comparison page shows precomputed 2D, 3D and R\* outlines for 14 held-out patients, with an
+"R\* + nnU-Net (candidate)" option that uses the 145-patient nnU-Net (the 226-patient one trained on these patients). The MRI
+Analysis page still runs the 2D ensemble live on uploaded slices. The hosted app is CPU-only and reads precomputed results.
+
+The sections below are the September 2026 history: the original 2D model and the first fresh-30 results.
+
+## What it does (September 2026)
 
 - Segments pediatric brain MRI scans across 4 tumor sub-regions: Enhancing Tumor (ET), Non-Enhancing Tumor Core (NETC), Cystic Component (CC), and Peritumoral Edema (ED)
 - Runs inference on real held-out patients using the shipped **ensemble** checkpoint (held-out mean Dice 0.754)
 - Displays per-region Dice scores, ROC curves, and training history
 - Generates clinical PDF reports
 
-## Model
+## The original 2D model (September 2026)
 
 The shipped `best.pt` is an **ensemble of two 2D U-Nets** — the original model (width 16, depth 3) and a wider continued-training model (width 64, depth 3) — whose softmax probabilities are averaged. It scores higher than either member on every region of the headline metric below — but read the ET caveat in the per-patient section before leaning on that.
 
@@ -73,7 +120,7 @@ Same ensemble, same 82 held-out patients, axial only, 492 sampled slices, pixels
 
 Architecture: 2D U-Net with optional MixUp augmentation and tumor-type classification head. Trained on axial slices from 4 MRI modalities (T1c, T1n, T2f, T2w). See `HANDOFF.md` for training history, lessons learned and what to do next.
 
-## Update 2026-09-26: fresh test set and the R\* recipe
+## Update 2026-09-26: fresh test set and the R\* recipe (history)
 
 Work continued after the section below was written, and it changed two things: the 0.754 headline turned out to be optimistic, and a better recipe exists.
 
@@ -96,7 +143,7 @@ Paired difference on the 30 fresh patients: +0.094 (95% CI +0.047 to +0.149). Th
 - **Tried, did not help:** training on pseudo-labels for the unlabelled patients (they contain far less enhancing tumour than real labels and hurt ET), and patch-based full-resolution 3D training. Halving the labelled training data cost only about 0.012, which suggests that more of the same data is not the quick fix.
 - **Only US BraTS-PEDs data was available.** Nothing has been measured on other scanners, protocols, countries or populations. The demo has not been changed and still runs the 2D ensemble alone.
 
-## Project status
+## 2D model status (September 2026)
 
 **Development of the 2D checkpoint stopped by decision, not because the model converged**, and the checkpoint the demo ships is unchanged. The remaining expected gain (roughly +0.01 to +0.02 held-out mean, an estimate that was never measured) was judged marginal against 10–17 hours of GPU time per attempt on one RTX 3060. Later work went into the 3D family and the R\* recipe above instead.
 
@@ -112,11 +159,13 @@ What that means, honestly:
 | Folder | Contents |
 |--------|----------|
 | `03_augmentation_eval/` | Training pipeline, evaluation scripts, ablation framework |
-| `05_frontend_demo/` | Streamlit app + demo cache (7 representative patients) |
+| `05_frontend_demo/` | Streamlit app: live 2D analysis on the demo cache, plus the precomputed 14-patient model comparison |
 | `00_shared/` | Shared contracts and data specifications |
 | `01_model_federated/` | 3D U-Net training and evaluation (including federated simulation and 3D augmentation); the 3D family used by R\* was trained here |
 | `02_domain_adaptation/` | Domain-alignment (CORAL, PCA/LDA) experiments |
-| `06_rstar_inference/` | The R\* inference module: 2D + 3D fusion with input checks, checkpoint pinning and tests |
+| `04_clinical_bio/` | Brief for the clinical framing and results narrative |
+| `06_rstar_inference/` | The inference module: R\* + nnU-Net (default) and plain R\*, with input checks, checkpoint pinning and tests |
+| `07_review_prototype/` | Local prototype showing the review flags (uncertain enhancing-tumour spots) for the doctors |
 
 ## Running locally
 
