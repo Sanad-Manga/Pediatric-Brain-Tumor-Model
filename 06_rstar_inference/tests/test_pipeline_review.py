@@ -229,7 +229,7 @@ def test_the_readme_documents_review_flags():
 @pytest.mark.skipif(not (MODELS_ROOT and TEST_DATA), reason="set RSTAR_MODELS_ROOT and RSTAR_TEST_DATA to run")
 @pytest.mark.parametrize("sid", ["BraTS-PED-00004-000", "BraTS-PED-00188-000", "BraTS-PED-00021-000"])
 def test_real_patients_match_the_demo_package_flags(sid):
-    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), review_flags=True))
+    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), review_flags=True, nnunet=False))
     paths = {m: Path(TEST_DATA) / sid / f"{sid}-{m}.nii.gz" for m in ("t1c", "t1n", "t2f", "t2w")}
     result, _ = seg.segment_paths(paths)
     demo = json.loads((DEMO_CACHE / sid / "review_spots.json").read_text(encoding="utf-8"))

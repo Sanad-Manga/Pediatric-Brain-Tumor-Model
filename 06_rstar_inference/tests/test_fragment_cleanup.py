@@ -195,7 +195,7 @@ def test_the_readme_documents_fragment_cleanup():
 @pytest.mark.parametrize("sid", ["BraTS-PED-00077-000", "BraTS-PED-00103-000", "BraTS-PED-00127-000"])
 def test_real_patients_change_little_and_keep_no_small_components(sid):
     import nibabel as nib
-    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT)))
+    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), nnunet=False))
     paths = {m: Path(TEST_DATA) / sid / f"{sid}-{m}.nii.gz" for m in ("t1c", "t1n", "t2f", "t2w")}
     off, _ = seg.segment_paths(paths)
     seg.cfg.fragment_cleanup = True

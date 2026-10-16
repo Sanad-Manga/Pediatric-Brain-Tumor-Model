@@ -16,6 +16,8 @@ from rstar.models import ModelIntegrityError
 from rstar.nnunet_member import load_nnunet, nnunet_probs
 
 MODELS_ROOT, TEST_DATA = os.environ.get("RSTAR_MODELS_ROOT"), os.environ.get("RSTAR_TEST_DATA")
+CONFIG = Path(__file__).parents[1] / "config"
+MANIFEST_145 = CONFIG / "models.nnunet145.json"
 BLOB = (slice(10, 30), slice(12, 34), slice(8, 28))    # 8800-voxel tumour
 ET = (slice(14, 24), slice(16, 26), slice(12, 20))      # 800 ET voxels inside it
 
@@ -79,15 +81,15 @@ def _seg(p2=None, p3=None, pn=None, predictor=None, **cfg):
 
 
 # ------------------------------------------------------------------------------------------------ Req 44
-def test_nnunet_is_off_by_default_and_validated():
-    assert RStarConfig().nnunet is False
+def test_nnunet_is_on_by_default_and_validated():
+    assert RStarConfig().nnunet is True                                   # Addendum 5 (Req 59)
     for bad in (1, "yes", None):
         with pytest.raises(ValueError, match="nnunet"):
             RStarConfig(nnunet=bad)
 
 
 def test_manifest_nnunet_entry_is_optional_and_validated():
-    manifest = load_manifest()
+    manifest = load_manifest(MANIFEST_145)
     assert "nnunet" in manifest and manifest["nnunet"]["path"].endswith("fold_all/checkpoint_final.pth")
     without = {k: v for k, v in manifest.items() if k != "nnunet"}
     assert validate_manifest(dict(without)) == without
@@ -295,7 +297,7 @@ def test_cli_builds_the_segmenter_with_the_option(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pipeline_mod, "RStarSegmenter", Fake)
     paths = _write_case(tmp_path)
-    for flag, expected in (([], False), (["--nnunet"], True)):
+    for flag, expected in (([], True), (["--nnunet"], True), (["--no-nnunet"], False)):   # Addendum 5 (Req 61)
         with pytest.raises(SystemExit):
             main([f"--{k}={v}" for k, v in paths.items()] + [f"--out={tmp_path / 's.nii.gz'}"] + flag)
         assert built["cfg"].nnunet is expected
@@ -315,15 +317,17 @@ def _dice(a, b):
 def test_the_nnunet_hash_matches_the_real_file():
     from rstar.models import verify_sha256
 
-    entry = load_manifest()["nnunet"]
-    verify_sha256(Path(MODELS_ROOT) / entry["path"], entry["sha256"])
+    for manifest in (None, MANIFEST_145):                 # the default (5 folds) and the 145-patient model (Req 51, 60)
+        entry = load_manifest(manifest)["nnunet"]
+        for item in entry.get("checkpoints", [entry]):
+            verify_sha256(Path(MODELS_ROOT) / item["path"], item["sha256"])
 
 
 @needs_data
 def test_three_fresh_patients_reproduce_the_fusion_scores():
     import nibabel as nib
 
-    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), nnunet=True))
+    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), manifest_path=MANIFEST_145, nnunet=True))
     for sid, ref in REFERENCE.items():
         base = Path(TEST_DATA) / sid
         result, _ = seg.segment_paths({n: base / f"{sid}-{n}.nii.gz" for n in ("t1c", "t1n", "t2f", "t2w")})
@@ -417,11 +421,14 @@ def test_multi_fold_entry_is_validated():
             validate_manifest(dict(base, nnunet=entry))
 
 
-def test_the_226_patient_manifest_lists_five_folds_of_one_model():
-    m = load_manifest(Path(__file__).parents[1] / "config" / "models.nnunet226.json")
+def test_the_default_manifest_is_the_226_patient_ensemble_and_145_is_separate():   # Addendum 5 (Req 60)
+    m = load_manifest()
     paths = [c["path"] for c in m["nnunet"]["checkpoints"]]
-    assert len(paths) == 5 and all(p.endswith(f"fold_{k}/checkpoint_final.pth") for k, p in enumerate(paths))
-    assert m["ensemble_2d"] == load_manifest()["ensemble_2d"] and m["family_3d"] == load_manifest()["family_3d"]
+    assert len(paths) == 5 and all(p.endswith(f"nnunet_Dataset502_226pts_5fold/fold_{k}/checkpoint_final.pth") for k, p in enumerate(paths))
+    m145 = load_manifest(MANIFEST_145)
+    assert m145["nnunet"]["path"].endswith("nnunet_Dataset501_3d_fullres/fold_all/checkpoint_final.pth")
+    assert m145["ensemble_2d"] == m["ensemble_2d"] and m145["family_3d"] == m["family_3d"]
+    assert not (CONFIG / "models.nnunet226.json").exists()
 
 
 # ------------------------------------------------------------------------------------------------ Req 57
@@ -508,11 +515,10 @@ REF226 = json.loads((Path(__file__).parent / "fixtures" / "rstar_nnunet226_refer
 def test_the_226_patient_ensemble_reproduces_its_reference():
     import nibabel as nib
 
-    manifest = Path(__file__).parents[1] / "config" / "models.nnunet226.json"
-    folds = [Path(MODELS_ROOT) / c["path"] for c in load_manifest(manifest)["nnunet"]["checkpoints"]]
+    folds = [Path(MODELS_ROOT) / c["path"] for c in load_manifest()["nnunet"]["checkpoints"]]
     if not all(f.is_file() for f in folds):
         pytest.skip("the 226-patient fold checkpoints are not under RSTAR_MODELS_ROOT")
-    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), manifest_path=manifest, nnunet=True))
+    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT)))      # the default since Addendum 5 (Req 62)
     assert len([c for c in seg._checkpoints if "nnunet" in c["name"]]) == 5
     for sid, ref in REF226.items():
         base = Path(TEST_DATA) / sid
@@ -521,3 +527,16 @@ def test_the_226_patient_ensemble_reproduces_its_reference():
         lab = result.labels.astype(np.int64)
         got = (_dice(lab == 1, truth == 1) + _dice(np.isin(lab, (1, 2, 3)), np.isin(truth, (1, 2, 3))) + _dice(lab > 0, truth > 0)) / 3
         assert got == pytest.approx(ref["mean"], abs=0.005), sid
+
+
+# ------------------------------------------------------------------------------------------------ Req 61 (Addendum 5)
+def test_cli_rejects_both_flags_and_leaves_an_injected_segmenter_alone(tmp_path):
+    paths = _write_case(tmp_path)
+    args = [f"--{k}={v}" for k, v in paths.items()] + [f"--out={tmp_path / 'seg.nii.gz'}"]
+    with pytest.raises(SystemExit) as e:
+        main(args + ["--nnunet", "--no-nnunet"], segmenter=_seg())
+    assert e.value.code == 2
+    seg = _seg(nnunet=True)
+    assert main(args, segmenter=seg) == 0 and seg.cfg.nnunet is True
+    seg = _seg(nnunet=True)
+    assert main(args + ["--no-nnunet"], segmenter=seg) == 0 and seg.cfg.nnunet is False

@@ -25,6 +25,7 @@ from precompute_comparison import DATA_ROOT, OUT_DIR, REGIONS, region_rates  # n
 from rstar import RStarConfig, RStarSegmenter  # noqa: E402
 
 MODELS_ROOT = Path(os.environ.get("RSTAR_MODELS_ROOT", r"C:\Users\ahmed\Pediatric-Brain-Tumor-Model"))
+MANIFEST_145 = HERE.parent / "06_rstar_inference" / "config" / "models.nnunet145.json"
 TRAIN_MANIFEST = HERE.parent / "00_shared" / "manifests" / "hospitalA_plus_B.json"
 NOTE = ("Candidate, not yet the deployed model: R* with a third model, nnU-Net, averaged in equally, and nnU-Net deciding "
         "cysts. In pre-registered tests it scored 0.844 vs R* 0.805 on 30 untouched patients, beat our 3D models by "
@@ -35,7 +36,8 @@ NOTE = ("Candidate, not yet the deployed model: R* with a third model, nnU-Net, 
 
 def main():
     trained_on = set(json.load(open(TRAIN_MANIFEST)))
-    seg = RStarSegmenter(RStarConfig(models_root=MODELS_ROOT, nnunet=True))
+    seg = RStarSegmenter(RStarConfig(models_root=MODELS_ROOT, nnunet=True,   # the 145-patient nnU-Net: the 226-patient
+                                     manifest_path=MANIFEST_145))           # one trained on these (held-out) patients
     for out_dir in sorted(p for p in OUT_DIR.iterdir() if p.is_dir()):
         sid = out_dir.name
         assert sid not in trained_on, f"{sid} was in nnU-Net's training set"

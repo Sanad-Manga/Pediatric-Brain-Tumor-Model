@@ -33,7 +33,7 @@ class RStarConfig:
     review_min_voxels: int = 50            # spots smaller than this are neither kept nor flagged
     fragment_cleanup: bool = False         # remove tiny tumour fragments before the 500 mm^3 rule (SPEC Addendum 3)
     cleanup_min_voxels: int = 200          # chosen on held-out (PREREGISTERED_fragments_hybrid_2026-10-04); needs CV
-    nnunet: bool = False                   # add the nnU-Net member: (2D + 3D + nnU-Net)/3, or 3D + nnU-Net halves (SPEC Addendum 4)
+    nnunet: bool = True                    # the nnU-Net member: (2D + 3D + nnU-Net)/3, or 3D + nnU-Net halves (SPEC Addenda 4, 5); False = plain R*
     models_root: Path | None = None        # where the (untracked) checkpoints live; default: env RSTAR_MODELS_ROOT, else the repo root
     manifest_path: Path | None = None
 

@@ -9,7 +9,7 @@ TINY = (48, 56, 40)
 
 
 def tiny_config(**overrides) -> RStarConfig:
-    kwargs = dict(expected_shape=TINY, device="cpu", verify_hashes=False)
+    kwargs = dict(expected_shape=TINY, device="cpu", verify_hashes=False, nnunet=False)  # plain R* unless a test asks (Req 59)
     kwargs.update(overrides)
     return RStarConfig(**kwargs)
 

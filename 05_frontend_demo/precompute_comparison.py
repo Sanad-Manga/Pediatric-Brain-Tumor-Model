@@ -61,7 +61,7 @@ def region_rates(pred, truth, labels):
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    cfg = RStarConfig(models_root=MODELS_ROOT, device="auto")
+    cfg = RStarConfig(models_root=MODELS_ROOT, device="auto", nnunet=False)  # plain R* = the "R*" files
     seg = RStarSegmenter(cfg)  # loads + hash-verifies the shipped 2D ensemble and 3D family once
 
     skipped = []

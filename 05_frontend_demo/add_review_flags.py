@@ -32,7 +32,8 @@ ALL_PRESENT = (True, True, True, True)
 
 
 def main():
-    cfg = RStarConfig(models_root=Path(os.environ.get("RSTAR_MODELS_ROOT", MODELS_ROOT)), device="auto")
+    cfg = RStarConfig(models_root=Path(os.environ.get("RSTAR_MODELS_ROOT", MODELS_ROOT)), device="auto",
+                      nnunet=False)  # plain R*: the deployed recipe these files describe
     seg = RStarSegmenter(cfg)
     for out in sorted(p for p in OUT_DIR.iterdir() if p.is_dir()):
         pid = out.name

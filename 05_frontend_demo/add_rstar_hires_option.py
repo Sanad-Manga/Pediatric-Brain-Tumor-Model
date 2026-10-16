@@ -59,7 +59,8 @@ def probs_3d_at(seg, vol, cube, models):
 
 
 def main():
-    cfg = RStarConfig(models_root=Path(os.environ.get("RSTAR_MODELS_ROOT", MODELS_ROOT)), device="auto")
+    cfg = RStarConfig(models_root=Path(os.environ.get("RSTAR_MODELS_ROOT", MODELS_ROOT)), device="auto",
+                      nnunet=False)  # plain R*: the hi-res option is built on it
     seg = RStarSegmenter(cfg)
     hires = load_hires_family(seg.device)
     for out in sorted(p for p in OUT_DIR.iterdir() if p.is_dir()):

@@ -37,7 +37,7 @@ def test_the_pinned_hashes_match_the_real_files():
 def test_three_fresh_patients_reproduce_the_reference_scores():
     import nibabel as nib
 
-    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT)))               # hash-verified, runs the geometry self-check
+    seg = RStarSegmenter(RStarConfig(models_root=Path(MODELS_ROOT), nnunet=False))               # hash-verified, runs the geometry self-check
     for sid, ref in REFERENCE.items():
         base = Path(TEST_DATA) / sid
         paths = {name: base / f"{sid}-{name}.nii.gz" for name in ("t1c", "t1n", "t2f", "t2w")}
