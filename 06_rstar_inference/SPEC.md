@@ -292,9 +292,9 @@ A standalone, guard-railed Python package (`rstar`) that segments one co-registe
 - [x] Req 56: multi-checkpoint nnunet manifest entry validated; bad forms raise; one model folder
 - [x] Req 57: every fold hash verified before any open; parameter sets in order; one info item per fold
 - [x] Req 58: 226-patient manifest reproduces F5 + cyst override on 3 fresh-30 patients (slow); README documents both
-- [ ] Req 59: nnunet on by default; nnunet=False byte-identical to plain R*; tiny_config explicit
-- [ ] Req 60: default manifest = 226-patient 5 folds; nnunet145 manifest; nnunet226 removed; same 2D/3D entries
-- [ ] Req 61: CLI default on, --no-nnunet, --nnunet accepted, both = error, injected segmenter untouched without flags
-- [ ] Req 62: real data: default (226) = Req 58 ref; 145 manifest = Req 51 ref; plain R* = Req 21 (slow)
-- [ ] Req 63: README documents the default, evidence, caveat, plain R*, 145 alternative; four modes
-- [ ] Req 64: demo scripts pinned to their recipes (plain R* x3, 145-patient nnU-Net for the candidate option)
+- [x] Req 59: nnunet on by default; nnunet=False byte-identical to plain R*; tiny_config explicit
+- [x] Req 60: default manifest = 226-patient 5 folds; nnunet145 manifest; nnunet226 removed; same 2D/3D entries
+- [x] Req 61: CLI default on, --no-nnunet, --nnunet accepted, both = error, injected segmenter untouched without flags
+- [x] Req 62: real data: default (226) = Req 58 ref; 145 manifest = Req 51 ref; plain R* = Req 21 (slow)
+- [x] Req 63: README documents the default, evidence, caveat, plain R*, 145 alternative; four modes
+- [x] Req 64: demo scripts pinned to their recipes (plain R* x3, 145-patient nnU-Net for the candidate option)
