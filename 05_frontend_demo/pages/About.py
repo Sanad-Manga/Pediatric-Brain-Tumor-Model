@@ -126,7 +126,7 @@ st.markdown("""
     <div class="timeline">
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 1 — Dataset Curation</div>
-            <div class="tl-desc">BraTS-PEDs 2024: 227 subjects curated (53 + 92 training, 82 held-out), 4 MRI modalities with expert annotations.</div>
+            <div class="tl-desc">BraTS-PEDs 2024 challenge dataset (local copy: TCIA package <code>BraTS-PEDs-v1</code>), 4 MRI modalities with expert annotations. 257 labeled subjects total: 145 used for training (53 from simulated Hospital A + 92 from simulated Hospital B), 82 held-out (used for some R* configuration decisions), and 30 "fresh-30" patients never used for any training or tuning decision — the clean test set referenced throughout the Model Comparison and Dashboard pages.</div>
         </div>
         <div class="tl-item"><div class="tl-dot"></div>
             <div class="tl-title">Phase 2 — Centralized Baseline</div>

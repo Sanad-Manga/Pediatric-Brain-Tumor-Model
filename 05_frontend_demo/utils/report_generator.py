@@ -22,7 +22,7 @@ def generate_report_text(patient_id: str, statistics: dict) -> str:
     """Render the summary. `statistics` keys are all optional but never faked."""
     s = statistics or {}
     lines = [
-        "NEUROFED AI - SEGMENTATION SUMMARY",
+        "NEUROPEDS AI - SEGMENTATION SUMMARY",
         "-------------------------------------------",
         f"Subject ID: {patient_id}",
         "Dataset: BraTS-PEDs pediatric cohort",

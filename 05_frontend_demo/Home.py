@@ -139,14 +139,15 @@ st.markdown("""
         color: #0F172A;
     }
     
-    /* Live Dot Animation */
+    /* Research-build status badge (static -- this is not a monitored live
+       service, so it no longer pulses like one). */
     .live-badge {
         display: flex;
         align-items: center;
         gap: 6px;
-        color: #10B981;
+        color: #475569;
         font-weight: 600;
-        background: #D1FAE5;
+        background: #F1F5F9;
         padding: 4px 10px;
         border-radius: 20px;
         font-size: 0.8rem;
@@ -154,15 +155,8 @@ st.markdown("""
     .live-dot {
         width: 6px;
         height: 6px;
-        background-color: #10B981;
+        background-color: #64748B;
         border-radius: 50%;
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
-        animation: pulse-green 2s infinite;
-    }
-    @keyframes pulse-green {
-        0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
-        70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -186,7 +180,7 @@ with st.sidebar:
     <div class="status-card">
         <div class="status-row">
             <span class="status-label">System Status</span>
-            <span class="live-badge"><div class="live-dot"></div>Online</span>
+            <span class="live-badge"><div class="live-dot"></div>Research build</span>
         </div>
         <div class="status-row">
             <span class="status-label">Analysis Engine</span>

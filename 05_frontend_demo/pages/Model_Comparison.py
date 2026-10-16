@@ -231,11 +231,36 @@ def main():
     if not patients:
         st.error("Comparison cache directory not found or empty.")
         return
-        
+
+    # Issue #64 — quick access to the failure-pattern candidates flagged for visual review.
+    # Only the subset actually present in this cache is offered; the remaining named cases
+    # (e.g. 00251, 00240, 00218, 00103, 00136, 00152, 00125) require the separate NIfTI
+    # handoff ZIP opened in ITK-SNAP and are not reachable from this page.
+    FLAGGED_CANDIDATES = {
+        "BraTS-PED-00188-000": "2D collapse candidate",
+        "BraTS-PED-00004-000": "2D collapse candidate",
+        "BraTS-PED-00093-000": "worst under-segmentation candidate",
+        "BraTS-PED-00156-000": "worst under-segmentation candidate",
+    }
+    available_flagged = [p for p in FLAGGED_CANDIDATES if p in patients]
+    if available_flagged:
+        with st.expander(f"🚩 Flagged cases from the failure-pattern review ({len(available_flagged)} available here)"):
+            st.caption("These are candidate patients for the under-segmentation / 2D-collapse visual review "
+                       "(Issue #64). Selecting one here only jumps the viewer to that patient — it does not "
+                       "represent a completed scientific finding; the actual visual review of original scans "
+                       "requires ITK-SNAP and the separate handoff package.")
+            cols = st.columns(len(available_flagged))
+            for col, pid in zip(cols, available_flagged):
+                short_id = pid.replace("BraTS-PED-", "").replace("-000", "")
+                if col.button(f"{short_id}\n{FLAGGED_CANDIDATES[pid]}", key=f"jump_{pid}", use_container_width=True):
+                    st.session_state["mc_patient_select"] = pid
+                    st.rerun()
+
     # Open on a clean, typical result (all three models agree, R* best); failures are one click away.
     default_patient = "BraTS-PED-00257-000"
-    selected_patient = st.selectbox("Select Patient Record", patients,
-                                    index=patients.index(default_patient) if default_patient in patients else 0)
+    if "mc_patient_select" not in st.session_state:
+        st.session_state["mc_patient_select"] = default_patient if default_patient in patients else patients[0]
+    selected_patient = st.selectbox("Select Patient Record", patients, key="mc_patient_select")
     
     if selected_patient:
         meta, lbl_2d, lbl_3d, lbl_rstar, review_mask, review_spots, lbl_rstar_hires = load_patient_data(selected_patient)

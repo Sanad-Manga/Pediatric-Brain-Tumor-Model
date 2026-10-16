@@ -35,12 +35,12 @@ st.markdown("""
 }
 .sub-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.04); }
 .sub-card.et  { border-left: 4px solid #EF4444; }
-.sub-card.ed  { border-left: 4px solid #F59E0B; }
+.sub-card.ed  { border-left: 4px solid #EAB308; }
 .sub-card.cc  { border-left: 4px solid #3B82F6; }
 .sub-card.net { border-left: 4px solid #10B981; }
 
 .sub-num  { font-size: 0.7rem; font-family: monospace; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 6px; }
-.et .sub-num  { color: #EF4444; } .ed .sub-num  { color: #F59E0B; }
+.et .sub-num  { color: #EF4444; } .ed .sub-num  { color: #EAB308; }
 .cc .sub-num  { color: #3B82F6; } .net .sub-num { color: #10B981; }
 
 .sub-name { font-size: 0.95rem; font-weight: 700; color: #0F172A; margin-bottom: 8px; }
