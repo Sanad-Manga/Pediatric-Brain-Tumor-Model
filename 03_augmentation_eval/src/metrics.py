@@ -87,6 +87,61 @@ def dice_regions(pred_classes, true_classes) -> dict[str, float]:
     }
 
 
+#: Cystic component. BraTS folds it into NC/WT, so it is invisible in those
+#: scores; it is reported separately via :func:`cyst_record` / :func:`aggregate_cyst`.
+#: Deliberately NOT part of REGIONS / REGION_ORDER, so ET/NC/WT and mean_dice
+#: (and the results-CSV contract) are unchanged.
+CYST_LABEL = 3
+
+
+def cyst_record(pred_classes, true_classes) -> dict:
+    """Per-subject cyst (label 3) Dice plus presence flags.
+
+    Same empty conventions as the regions: no cyst in prediction and ground
+    truth -> 1.0; cyst in only one of them -> 0.0.
+    """
+    pred = _to_numpy(pred_classes)
+    true = _to_numpy(true_classes)
+    if pred.shape != true.shape:
+        raise ValueError(
+            f"prediction shape {pred.shape} does not match ground truth shape {true.shape}"
+        )
+    pred_c, true_c = pred == CYST_LABEL, true == CYST_LABEL
+    return {
+        "dice_cyst": dice_score(pred_c, true_c),
+        "gt_has_cyst": bool(true_c.any()),
+        "pred_has_cyst": bool(pred_c.any()),
+    }
+
+
+def aggregate_cyst(per_subject: list[dict]) -> dict:
+    """Summarise :func:`cyst_record` rows (or dicts containing those keys).
+
+    ``dice_cyst`` averages over ALL subjects and is inflated by the
+    both-empty -> 1.0 convention (only ~a quarter of patients have a cyst), so
+    ``dice_cyst_gt_cyst`` -- the mean over patients whose expert mask has a
+    cyst -- is reported alongside; it is None when there are none.
+    """
+    if not per_subject:
+        raise ValueError("cannot aggregate an empty list of per-subject scores")
+    all_d = [s["dice_cyst"] for s in per_subject]
+    pos = [s["dice_cyst"] for s in per_subject if s["gt_has_cyst"]]
+    return {
+        "dice_cyst": float(np.mean(all_d)),
+        "dice_cyst_gt_cyst": float(np.mean(pos)) if pos else None,
+        "n_subjects": len(per_subject),
+        "n_gt_cyst": len(pos),
+        "n_pred_cyst": int(sum(s["pred_has_cyst"] for s in per_subject)),
+    }
+
+
+def format_cyst(c: dict) -> str:
+    pos = "n/a" if c["dice_cyst_gt_cyst"] is None else f"{c['dice_cyst_gt_cyst']:.4f}"
+    return (f"cyst Dice={c['dice_cyst']:.4f} (all {c['n_subjects']} patients), "
+            f"{pos} (the {c['n_gt_cyst']} with an expert cyst); "
+            f"prediction has cyst in {c['n_pred_cyst']}")
+
+
 def logits_to_classes(logits) -> np.ndarray:
     """Argmax over the class channel of ``(B, C, D, H, W)`` or ``(C, D, H, W)``."""
     arr = _to_numpy(logits)
