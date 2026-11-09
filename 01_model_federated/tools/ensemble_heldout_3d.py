@@ -46,6 +46,7 @@ def _load_metrics_module():
 
 _metrics = _load_metrics_module()
 REGION_ORDER, aggregate, dice_regions = _metrics.REGION_ORDER, _metrics.aggregate, _metrics.dice_regions
+aggregate_cyst, cyst_record, format_cyst = _metrics.aggregate_cyst, _metrics.cyst_record, _metrics.format_cyst
 
 
 def load_model(checkpoint_path: Path, device: str) -> FederatedUNet3D:
@@ -95,7 +96,7 @@ def main() -> int:
         x_t = torch.from_numpy(x)[None].to(device)
         probs = ensemble_probs(models, x_t)
         pred = torch.argmax(probs, dim=1)[0].cpu().numpy().astype(np.int64)
-        scores.append(dice_regions(pred, true))
+        scores.append({**dice_regions(pred, true), **cyst_record(pred, true)})
         if n % 20 == 0 or n == len(subjects):
             print(f"  {n}/{len(subjects)} subjects scored ({time.time()-t0:.0f}s elapsed)", flush=True)
 
@@ -105,6 +106,7 @@ def main() -> int:
 
     agg = aggregate(scores)
     mean = sum(agg[f"dice_{r}"] for r in REGION_ORDER) / len(REGION_ORDER)
+    cyst = aggregate_cyst(scores)
     result = {
         "checkpoints": args.checkpoints,
         "n_subjects_scored": len(scores),
@@ -112,11 +114,13 @@ def main() -> int:
         "missing_subjects": missing,
         "dice": {f"dice_{r}": agg[f"dice_{r}"] for r in REGION_ORDER},
         "mean": mean,
+        "cyst": cyst,
         "elapsed_seconds": round(time.time() - t0, 1),
     }
     print("RESULT_JSON:" + json.dumps(result))
     print(f"\n{'  '.join(f'{r}={agg[f'dice_{r}']:.4f}' for r in REGION_ORDER)}  mean={mean:.4f}  "
           f"({len(scores)}/{len(subjects)} subjects, {len(missing)} missing from cache)")
+    print(format_cyst(cyst))
     if args.out_json:
         Path(args.out_json).write_text(json.dumps(result, indent=2), encoding="utf-8")
     return 0
