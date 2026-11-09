@@ -40,7 +40,10 @@ from .model import build_model, infer_geometry
 from .metrics import (
     REGION_ORDER,
     aggregate,
+    aggregate_cyst,
     count_empty_ground_truth,
+    cyst_record,
+    format_cyst,
     dice_regions,
 )
 from .postproc import DEFAULT_POSTPROC, probs_to_classes
@@ -210,7 +213,9 @@ def evaluate_subject(model, items, cfg: Config, device: str = "cpu"):
     prob_volume = prob_sum / len(planes_used)
     pred_volume = probs_to_classes(prob_volume, **cfg.postproc)
 
-    return dice_regions(pred_volume, true_volume), true_volume, planes_used
+    scores = {**dice_regions(pred_volume, true_volume),
+              **cyst_record(pred_volume, true_volume)}
+    return scores, true_volume, planes_used
 
 
 def build_eval_dataset(cfg: Config, dummy_data: bool, dummy_n: int, cache_dir=None,
@@ -318,6 +323,7 @@ def run(
 
     scores = aggregate(per_subject)
     empty_gt = count_empty_ground_truth(true_masks)
+    cyst = aggregate_cyst(per_subject)
 
     row = {
         "experiment_name": experiment_name,
@@ -345,10 +351,12 @@ def run(
         print("  post-processing: " + "  ".join(f"{k}={v}" for k, v in pp.items()))
     print("  subjects with an empty ground-truth region: " +
           ", ".join(f"{r}={empty_gt[r]}" for r in REGION_ORDER))
+    print("  " + format_cyst(cyst))
     if single_plane:
         print(f"  single-plane subjects (expected both): {len(single_plane)}")
     print(f"  wrote: {out}" if write_csv else "  (CSV write skipped)")
 
     row["_empty_ground_truth"] = empty_gt
+    row["_cyst"] = cyst
     row["_n_subjects"] = len(per_subject)
     return row
