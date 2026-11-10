@@ -3,7 +3,7 @@
 R* expects BraTS-style input: the four sequences (T1c, T1n, T2-FLAIR, T2w) aligned to each other, skull-stripped, on a
 1 mm grid. This module will hold the steps that turn a hospital scan into that. **Part 1, done: sequence alignment.**
 Skull stripping, DICOM conversion and resampling wait for the first real hospital scans, so they are built against real
-data.
+data. The plan for them (tool per step, step order, questions for the hospital) is in [PLAN.md](PLAN.md).
 
 ## Alignment
 
