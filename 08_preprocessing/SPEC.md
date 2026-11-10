@@ -124,3 +124,70 @@ enhancing-tumour decision).
 - [ ] Req 16: threshold 0 never skips; different grid always resampled.
 - [ ] Req 17: CLI --skip-below-mm sets and records the threshold.
 - [ ] Req 18: real-scan check on 3 fresh-30 patients.
+
+---
+
+# Addendum 2 (10 Nov 2026): who is right when the step and the scan disagree (issue #65)
+
+## Goal
+Verification B leaves the step's main question open: on BraTS FLAIR/T2w scans the step moves an already-aligned
+sequence by 0.5-1.6 mm, and nothing so far says whether the sequence was out of place (the step is right and BraTS's
+co-registration is loose) or the step is drifting (BraTS is right and the step is adding error to clean data). Decide
+it per patient and sequence, and show where the two positions differ.
+
+Issue #65 asks for the decision by eye in ITK-SNAP. The eye cannot carry it: the two positions are about one voxel
+apart, and our candidate has been resampled once more than the scan's own, so it is the blurrier of the two whatever
+its position. The check therefore produces both - a figure to look at, and a verdict from criteria that are not the
+step's own.
+
+## In Scope
+- `prep/judge.py`, `judge(moving, t1c, ours)`: score the two candidate positions (leave the sequence where the scan
+  has it, or apply the step's transform) and return a verdict.
+- `tools/visual_check.py`: per patient, run the step on each sequence, judge it, and write a figure showing each
+  candidate's edges over T1c in three planes plus a zoom where they differ most.
+- Unit tests on a two-contrast phantom (`tests/phantoms.py`), both directions.
+- Run it on the cases in issue #65 - 00127 (T2w), 00133 (FLAIR), 00136 (FLAIR) - and record the verdicts.
+
+## Out of Scope
+- Changing the registration, the skip rule or the threshold. This addendum only measures; acting on the answer is a
+  separate decision.
+- Non-rigid registration, and any judgement of BraTS's atlas registration (only inter-sequence alignment is at issue).
+- Deciding whether R* should use the step; that depends on verification C, not on this.
+
+## Requirements
+19. Both candidates are compared after exactly one linear interpolation each, on a common half-voxel-shifted copy of
+    the T1c grid, so neither is the sharper image for free.
+20. Four criteria score each candidate, none of them the step's own metric with the step's own sampling: edge-strength
+    correlation, normalised mutual information over a 64-bin joint histogram, ITK's joint-histogram mutual
+    information, and ANTS local neighbourhood correlation. All four are computed inside the brain only.
+21. The brain mask is eroded (default 3 mm) before any criterion is computed: BraTS applies one skull-strip mask to
+    all four sequences, so the brain outline agrees at identity whatever the anatomy inside does.
+22. Verdict rule: "no disagreement" when the two candidates are less than 0.3 mm apart; otherwise "aligned better" or
+    "original better" when at least 2 pieces of evidence vote that way and none votes the other way; "can't tell"
+    otherwise. A criterion ties when the two candidates are within 0.1% of each other.
+23. A fifth piece of evidence re-registers the sequence with a different metric, sampling, mask and optimiser and
+    votes for the candidate it lands on; it abstains when it lands more than 5 mm from both, because mutual
+    information can settle on a spurious optimum and such a run is evidence about nothing.
+24. On a two-contrast phantom: a sequence displaced by about 1.5 mm is judged "aligned better"; an untouched sequence
+    with a bogus 1.5 mm transform is judged "original better"; an untouched sequence with the step's own transform is
+    judged "no disagreement".
+25. `tools/visual_check.py` writes one PNG per sequence (axial, coronal, sagittal and a zoom at the largest
+    disagreement, each candidate's edges drawn over T1c) and `verdicts.json`; it exits non-zero naming a missing input.
+26. Every run is deterministic for the same inputs.
+27. Verdicts for 00127 (T2w), 00133 (FLAIR) and 00136 (FLAIR) in `RESULTS_alignment.md`, with the figures posted to
+    issue #65.
+
+**Assumption:** the sequence being judged is already on the T1c grid, as BraTS scans are; `judge` refuses anything
+else, because the question "did the scan already have it in the right place" only means something then.
+
+## Done Checklist
+- [x] Req 19: common half-voxel-shifted grid, one interpolation per candidate.
+- [x] Req 20: four criteria, none of them the step's own metric and sampling.
+- [x] Req 21: brain mask eroded before scoring.
+- [x] Req 22: verdict rule as stated, including "no disagreement" and "can't tell".
+- [x] Req 23: re-registration abstains when it lands near neither candidate.
+- [x] Req 24: phantom gets all three directions right.
+- [x] Req 25: CLI writes the figures and verdicts.json; missing input exits non-zero.
+- [x] Req 26: deterministic.
+- [ ] Req 27: verdicts for 00127, 00133, 00136 - **blocked: BraTS-PEDs is not on this machine** (see
+      RESULTS_alignment.md, Addendum 2).

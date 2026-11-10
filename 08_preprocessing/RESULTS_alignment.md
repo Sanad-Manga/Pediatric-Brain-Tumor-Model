@@ -85,3 +85,56 @@ Real-scan check (`tools/check_skip.py`, untouched fresh-30 scans, default thresh
 **Req 18: PASS.** 8 of 9 sequences are left byte-identical; 00127 T2w (1.59 mm) is realigned. Note the rule protects
 already-aligned scans only: a genuinely misaligned scan (C: 2 mm + 3 degrees) is still resampled, and 00077's flip in C
 came from that realignment, so it is not prevented by this rule.
+
+
+## Addendum 2: who is right when the step and the scan disagree (issue #65, 10 Nov 2026)
+
+Verification B left the step's central question open - on BraTS FLAIR/T2w the step moves an already-aligned sequence
+by 0.5-1.6 mm, and the numbers could not say whether that is BraTS being loose or the step drifting. `prep/judge.py`
+answers it per sequence and `tools/visual_check.py` draws it; 15 new unit tests pass (28 in the module).
+
+**Why not by eye alone.** The two positions are about one voxel apart, and our candidate has been resampled once more
+than the scan's own, so it is the blurrier of the two whatever its position - in an ITK-SNAP overlay it looks worse
+either way. The judge therefore resamples *both* candidates onto one half-voxel-shifted grid, so each has been through
+exactly one linear interpolation, and scores them with four criteria that are not the step's own metric and sampling
+(edge-strength correlation, a 64-bin NMI, ITK's joint-histogram MI, ANTS local correlation), inside a brain mask eroded
+by 3 mm - BraTS gives all four sequences the same skull-strip mask, so the brain outline agrees at identity whatever
+the anatomy inside does, and keeping it would be evidence for identity by construction. A fifth vote comes from
+re-registering with a different metric, sampling, mask and optimiser and asking which candidate it lands on.
+
+A `test_align.py`-style check confirms the trap is real: one extra resampling, with no movement at all, already lowers
+edge correlation against T1c (`test_a_naive_comparison_would_punish_resampling_on_its_own`).
+
+**Req 24: PASS.** `tools/check_judge.py`, two-contrast phantom (brain, cortical ribbon, ventricles, rim-enhancing
+tumour, noise; 'T1c' and 'T2w' contrast inverted), displaced by 0.6/-0.4/0.5 degrees + 1.1/-0.8/0.4 mm = 1.449 mm mean,
+about the size of the BraTS disagreements:
+
+| Case | Expected | Verdict | Step moves it (mm) | gradient correlation | brain nmi | joint mi | ants cc | re-registered |
+|---|---|---|---|---|---|---|---|---|
+| A: displaced 1.45 mm, step recovers it | aligned better | **aligned better** | 1.434 | aligned | aligned | aligned | aligned | joint: aligned |
+| B: in place, step proposes 1.45 mm anyway | original better | **original better** | 1.449 | original | original | original | original | joint: undecided |
+| C: in place, step decides for itself | no disagreement | **no disagreement** | 0.014 | tie | tie | tie | tie | joint: undecided |
+
+All four criteria agree unanimously in both directions and all four tie when nothing moved, so the instrument
+separates a 1.5 mm disagreement and does not simply rubber-stamp the step.
+
+Mutation check on `prep/judge.py`: 7 of 8 mutants killed - swapping the two candidates in the vote, forgetting that
+ITK metrics are minimised, letting one criterion alone decide, ignoring a criterion that points the other way, letting
+a runaway re-registration vote, scoring on the T1c grid instead of the shifted one, and dropping the mask erosion.
+The survivor (`>` to `>=` on the tie band) is equivalent.
+
+**Note on the re-registration.** It is the weakest of the five and abstains often: an unbounded line search ran away by
+hundreds of mm until the step was bounded, and even bounded it settled 3.3 mm from both candidates on one phantom run.
+That is why it only ever abstains or confirms, and why the four scored criteria carry the verdict.
+
+**Req 27: NOT MET - no data.** The three cases issue #65 asks about (00127 T2w, 00133 FLAIR, 00136 FLAIR) have not been
+run: BraTS-PEDs is not on this machine (`D:\NeuroPeds AI\...\Training`, the path the other tools use, does not exist
+here, and there is no NIfTI anywhere on it). The command is one line per patient on the machine that has the data:
+
+```
+python tools/visual_check.py --t1c <p>-t1c.nii.gz --t1n <p>-t1n.nii.gz --t2f <p>-t2f.nii.gz --t2w <p>-t2w.nii.gz \
+    --out-dir out/00127 --label BraTS-PED-00127-000
+```
+
+It writes `out/00127/BraTS-PED-00127-000-{t2f,t2w}.png` (the figures to post on the issue) and `verdicts.json`.
+Expect a few minutes per patient; `--ants` adds a second re-registration and a lot of time.
